@@ -144,6 +144,7 @@ class MG_Config(Config):
         """
         self.obs.collect_obs = True     # whether to collect observations
         self.obs.camera_names = []      # which cameras to render observations from
+        self.obs.render_image_names = []# which cameras to render images from
         self.obs.camera_height = 84     # camera height
         self.obs.camera_width = 84      # camera width
 

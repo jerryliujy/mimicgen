@@ -8,6 +8,7 @@ Main data generation script.
 Examples:
 
     # run normal data generation
+    ############### for a formal run ###############
     python generate_dataset.py --config /path/to/config.json
 
     # render all data generation attempts on-screen
@@ -132,9 +133,14 @@ def generate_dataset(
 
     if write_video:
         # debug video - use same cameras as observations
+        # TODO: support different cameras for video and observations
         if len(mg_config.obs.camera_names) > 0:
             assert render_image_names is None
             render_image_names = list(mg_config.obs.camera_names)
+            
+        if len(mg_config.obs.render_image_names) > 0:
+            assert render_image_names is None
+            render_image_names = list(mg_config.obs.render_image_names)
 
     # path to source dataset
     source_dataset_path = os.path.expandvars(os.path.expanduser(mg_config.experiment.source.dataset_path))
@@ -217,6 +223,10 @@ def generate_dataset(
         render_image_names = RobomimicUtils.get_default_env_cameras(env_meta=env_meta)
     if render:
         # on-screen rendering can only support one camera
+        # support using render_image_names for on-screen rendering
+        render_image_names = list(mg_config.obs.render_image_names)
+        if render_image_names is None:
+            render_image_names = RobomimicUtils.get_default_env_cameras(env_meta=env_meta)
         assert len(render_image_names) == 1
 
     # env args: cameras to use come from debug camera video to write, or from observation collection
