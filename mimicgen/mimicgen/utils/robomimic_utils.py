@@ -154,6 +154,7 @@ def make_dataset_video(
 def get_default_env_cameras(env_meta):
     """
     Get the default set of cameras for a particular robomimic environment type.
+    `DEFAULT_CAMERAS` is in playback_dataset.py and the default camera is agentview.
 
     Args:
         env_meta (dict): environment metadata compatible with robomimic, see

@@ -119,16 +119,16 @@ class SingleArmEnv_MG(SingleArmEnv):
             quat=string_to_array("0.683 0.183 0.183 0.683"),
         )
 
-    def _pertube_xpos(self, xpos, x_noise_max=0.5, initialization_noise="uniform"):
+    def _perturb_xpos(self, xpos, x_noise_max=0, y_noise_max=1.0, initialization_noise="uniform"):
         """
-        Perturb the position of the object.
+        Perturb the position of the robot base.
         """
         xpos = np.array(xpos)
         
         table_size = self.table_full_size
 
-        table_y_min = -table_size[1] / 2
-        table_y_max = table_size[1] / 2
+        table_y_min = -table_size[1] / 2 * y_noise_max
+        table_y_max = table_size[1] / 2 * y_noise_max
 
         if initialization_noise == "gaussian":
             x_noise = np.abs(np.random.randn()) * x_noise_max
@@ -141,9 +141,10 @@ class SingleArmEnv_MG(SingleArmEnv):
             raise ValueError("Error: Invalid noise type specified. Options are 'gaussian' or 'uniform'.")
         xpos[0] -= x_noise
         xpos[1] = y_pos
+        # xpos[1] = 0.0
         return xpos
     
-    def _pertube_ori(self, yaw_max=np.pi/2, initialization_noise="uniform"):
+    def _perturb_ori(self, yaw_max=np.pi/2, initialization_noise="uniform"):
         """
         Generate random perturbation for the robot base orientation.
         Returns:

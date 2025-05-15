@@ -249,19 +249,19 @@ class Square_D1(Square_D0):
 
         #####################################
         # Add noise to the base position
-        xpos_prev = np.array(xpos).copy()
-        xpos = self._pertube_xpos(xpos)
+        # xpos_prev = np.array(xpos).copy()
+        # xpos = self._perturb_xpos(xpos)
         
-        print("Base position before: ", xpos_prev)
-        print("Base position after: ", xpos)
-        print("")
+        # print("Base position before: ", xpos_prev)
+        # print("Base position after: ", xpos)
+        # print("")
         
         self.robots[0].robot_model.set_base_xpos(xpos)
 
         # add rotation to the base position
-        rotation = self._pertube_ori()
-        print("Generated rotation (roll, pitch, yaw):", rotation)
-        self.robots[0].robot_model.set_base_ori(rotation) 
+        # rotation = self._perturb_ori()
+        # print("Generated rotation (roll, pitch, yaw):", rotation)
+        # self.robots[0].robot_model.set_base_ori(rotation) 
 
         # load model for table top workspace
         mujoco_arena = self._load_arena()
@@ -377,16 +377,37 @@ class Square_D2(Square_D1):
         old_agentview_full_camera_pose = (old_agentview_full_camera.get("pos"), old_agentview_full_camera.get("quat"))
         old_agentview_wide_camera = find_elements(root=mujoco_arena.worldbody, tags="camera", attribs={"name": "wideview"}, return_first=True)
         old_agentview_wide_camera_pose = (old_agentview_wide_camera.get("pos"), old_agentview_wide_camera.get("quat"))
+        
+        # test different camera positions
+        old_frontview_camera = find_elements(root=mujoco_arena.worldbody, tags="camera", attribs={"name": "frontview"}, return_first=True)
+        old_frontview_camera_pose = (old_frontview_camera.get("pos"), old_frontview_camera.get("quat"))
+        mujoco_arena.set_camera(
+            camera_name="frontview",
+            pos=string_to_array(old_frontview_camera_pose[0]),
+            quat=string_to_array(old_frontview_camera_pose[1]),
+        )
+        
+        old_birdview_camera = find_elements(root=mujoco_arena.worldbody, tags="camera", attribs={"name": "birdview"}, return_first=True)
+        old_birdview_camera_pose = (old_birdview_camera.get("pos"), old_birdview_camera.get("quat"))
+        mujoco_arena.set_camera(
+            camera_name="birdview",
+            pos=string_to_array(old_birdview_camera_pose[0]),
+            quat=string_to_array(old_birdview_camera_pose[1]),
+        )
+        
+        old_sideview_camera = find_elements(root=mujoco_arena.worldbody, tags="camera", attribs={"name": "sideview"}, return_first=True)
+        old_sideview_camera_pose = (old_sideview_camera.get("pos"), old_sideview_camera.get("quat"))
+        mujoco_arena.set_camera(
+            camera_name="sideview",
+            pos=string_to_array(old_sideview_camera_pose[0]),
+            quat=string_to_array(old_sideview_camera_pose[1]),
+        )
+        
         mujoco_arena.set_camera(
             camera_name="agentview",
             pos=string_to_array(old_agentview_full_camera_pose[0]),
             quat=string_to_array(old_agentview_full_camera_pose[1]),
         )
-        # mujoco_arena.set_camera(
-        #     camera_name="agentview",
-        #     pos=string_to_array(old_agentview_wide_camera_pose[0]),
-        #     quat=string_to_array(old_agentview_wide_camera_pose[1]),
-        # )
         mujoco_arena.set_camera(
             camera_name="agentview_full",
             pos=string_to_array(old_agentview_camera_pose[0]),

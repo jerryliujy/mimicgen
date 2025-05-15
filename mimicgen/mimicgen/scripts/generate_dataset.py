@@ -139,7 +139,6 @@ def generate_dataset(
             render_image_names = list(mg_config.obs.camera_names)
             
         if len(mg_config.obs.render_image_names) > 0:
-            assert render_image_names is None
             render_image_names = list(mg_config.obs.render_image_names)
 
     # path to source dataset
@@ -231,6 +230,8 @@ def generate_dataset(
 
     # env args: cameras to use come from debug camera video to write, or from observation collection
     camera_names = (mg_config.obs.camera_names if not write_video else render_image_names)
+    if mg_config.obs.camera_names is not None:
+        camera_names = list(mg_config.obs.camera_names)
 
     # env args: don't use image obs when writing debug video
     use_image_obs = ((mg_config.obs.collect_obs and (len(mg_config.obs.camera_names) > 0)) if not write_video else False)
