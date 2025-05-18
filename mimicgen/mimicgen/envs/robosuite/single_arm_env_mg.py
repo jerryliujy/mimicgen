@@ -144,7 +144,7 @@ class SingleArmEnv_MG(SingleArmEnv):
         # xpos[1] = 0.0
         return xpos
     
-    def _perturb_ori(self, yaw_max=np.pi/2, initialization_noise="uniform"):
+    def _perturb_ori(self, yaw_max=np.pi/3, initialization_noise="uniform"):
         """
         Generate random perturbation for the robot base orientation.
         Returns:
@@ -162,4 +162,30 @@ class SingleArmEnv_MG(SingleArmEnv):
         noise[2] = yaw_noise  
         # noise[2] = 0
         return noise  # Return (roll, pitch, yaw)
+    
+    def _perturb_qpos(self, qpos, qpos_noise_max=1.0, initialization_noise="uniform", filtered_keys=None):
+        """
+        Perturb the joint positions of the robot.
+        The `init_qpos` property in robosuite should have 7 elements, and here is a breakdown of the elements:
+        0: base rotation joint
+        1: shoulder pan joint
+        2: upper arm joint
+        3: elbow joint
+        4: front arm rotation joint
+        5: wrist rotation joint
+        6: end effector joint (gripper)
+        """
+        assert(filtered_keys is None or len(qpos) == len(filtered_keys)), "Error: Number of qpos must match number of filtered keys."
+        qpos = np.array(qpos)
+        if initialization_noise == "gaussian":
+            qpos_noise = np.abs(np.random.randn(len(qpos))) * qpos_noise_max
+        elif initialization_noise == "uniform":
+            qpos_noise = np.random.uniform(-qpos_noise_max, qpos_noise_max, len(qpos))
+        else:
+            raise ValueError("Error: Invalid noise type specified. Options are 'gaussian' or 'uniform'.")
+
+        if filtered_keys is not None:
+            filtered_keys = filtered_keys == 0
+            qpos_noise = np.where(filtered_keys, qpos_noise, 0.0)
+        return qpos + qpos_noise
         

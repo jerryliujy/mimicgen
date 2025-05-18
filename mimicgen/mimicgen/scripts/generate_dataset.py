@@ -22,6 +22,10 @@ Examples:
 
     # pause after every subtask to debug data generation
     python generate_dataset.py --config /path/to/config.json --render --pause_subtask
+
+On rendering machines, if met `qt.qpa.xcb: could not connect to display` error,
+You should set `DISPLAY` environment to localhost:10.0:
+    export DISPLAY=localhost:10.0
 """
 
 import os

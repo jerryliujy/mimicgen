@@ -249,19 +249,25 @@ class Square_D1(Square_D0):
 
         #####################################
         # Add noise to the base position
-        # xpos_prev = np.array(xpos).copy()
-        # xpos = self._perturb_xpos(xpos)
+        xpos_prev = np.array(xpos).copy()
+        xpos = self._perturb_xpos(xpos)
         
-        # print("Base position before: ", xpos_prev)
-        # print("Base position after: ", xpos)
-        # print("")
+        print("Base position before: ", xpos_prev)
+        print("Base position after: ", xpos)
         
         self.robots[0].robot_model.set_base_xpos(xpos)
 
         # add rotation to the base position
-        # rotation = self._perturb_ori()
-        # print("Generated rotation (roll, pitch, yaw):", rotation)
-        # self.robots[0].robot_model.set_base_ori(rotation) 
+        rotation = self._perturb_ori()
+        print("Generated rotation (roll, pitch, yaw):", rotation)
+        self.robots[0].robot_model.set_base_ori(rotation) 
+        
+        # add noise to the joint position
+        qpos_prev = self.robots[0].init_qpos
+        qpos = self._perturb_qpos(qpos_prev)
+        print("Joint position before: ", qpos_prev)
+        print("Joint position after: ", qpos)
+        self.robots[0].init_qpos = qpos 
 
         # load model for table top workspace
         mujoco_arena = self._load_arena()

@@ -58,6 +58,7 @@ class RobosuiteInterface(MG_EnvInterface):
 
         # current position and rotation
         curr_pose = self.get_robot_eef_pose()
+        # print("************curr_pose***************:", curr_pose)
         curr_pos, curr_rot = PoseUtils.unmake_pose(curr_pose)
 
         # get maximum position and rotation action bounds
