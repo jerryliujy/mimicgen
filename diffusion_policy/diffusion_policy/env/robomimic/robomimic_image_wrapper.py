@@ -5,6 +5,7 @@ import gym
 from gym import spaces
 from omegaconf import OmegaConf
 from robomimic.envs.env_robosuite import EnvRobosuite
+from diffusion_policy.env.robomimic.robosuite import *
 
 class RobomimicImageWrapper(gym.Env):
     def __init__(self, 

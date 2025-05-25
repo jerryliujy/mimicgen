@@ -15,9 +15,6 @@ try:
 except ImportError:
     pass
 
-import mimicgen
-
-
 class SingleArmEnv_MG(SingleArmEnv):
     """
     Custom version of base class for single arm robosuite tasks for mimicgen.
