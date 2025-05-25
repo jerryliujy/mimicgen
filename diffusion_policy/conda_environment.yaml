@@ -12,9 +12,9 @@ dependencies:
   - python=3.9
   - pip=22.2.2
   - cudatoolkit=12.4
-  - pytorch=2.1.0
-  - torchvision=0.16.0
-  - pytorch3d=0.7.0
+  - pytorch=2.0.1
+  - torchvision=0.15.2
+  - pytorch3d=0.7.4
   - numpy=1.23.3
   - numba==0.56.4
   - scipy==1.9.1
