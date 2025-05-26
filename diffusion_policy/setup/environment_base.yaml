@@ -1,0 +1,21 @@
+name: dp
+channels:
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch/linux-64/
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.9
+  - pip=22.2.2
+  # CUDA 和 PyTorch 核心
+  - cudatoolkit=11.8  # 更稳定的版本
+  - pytorch=2.0.1
+  - torchvision=0.15.2
+  - pytorch3d=0.7.4
+  # 基础科学计算包
+  - numpy=1.23.3
+  - scipy=1.9.1
+  - matplotlib=3.6.1

@@ -90,16 +90,16 @@ training:
   resume: True
   # optimization
   lr_scheduler: cosine
-  lr_warmup_steps: 500
-  num_epochs: 3000
+  lr_warmup_steps: 175
+  num_epochs: 1000
   gradient_accumulate_every: 1
   # EMA destroys performance when used with BatchNorm
   # replace BatchNorm with GroupNorm.
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 50
-  checkpoint_every: 50
+  rollout_every: 200
+  checkpoint_every: 500
   val_every: 1
   sample_every: 5
   # steps per epoch
@@ -118,6 +118,8 @@ logging:
   group: null
 
 checkpoint:
+  save_ckpt: True
+  save_specific_steps: [800, 900]  
   topk:
     monitor_key: test_mean_score
     mode: max
