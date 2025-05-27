@@ -16,13 +16,18 @@ import torch
 import dill
 import wandb
 import json
+from omegaconf import OmegaConf
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 
-@click.command()
-@click.option('-c', '--checkpoint', required=True)
-@click.option('-o', '--output_dir', required=True)
-@click.option('-d', '--device', default='cuda:0')
-def main(checkpoint, output_dir, device):
+@hydra.main(
+    version_base=None,
+    config_path=str(pathlib.Path(__file__).parent.joinpath(
+        'diffusion_policy','config', 'eval'))
+)
+def main(eval_cfg: OmegaConf):
+    output_dir = eval_cfg.output_dir
+    checkpoint = eval_cfg.checkpoint
+    device = eval_cfg.device
     if os.path.exists(output_dir):
         click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
     pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -45,9 +50,15 @@ def main(checkpoint, output_dir, device):
     policy.eval()
     
     # run eval
-    env_runner = hydra.utils.instantiate(
-        cfg.task.env_runner,
-        output_dir=output_dir)
+    if eval_cfg is not None:
+        OmegaConf.resolve(eval_cfg)
+        env_runner = hydra.utils.instantiate(
+            eval_cfg.env_runner,
+            output_dir=output_dir)
+    else:
+        env_runner = hydra.utils.instantiate(
+            cfg.task.env_runner,
+            output_dir=output_dir)
     runner_log = env_runner.run(policy)
     
     # dump log to json
