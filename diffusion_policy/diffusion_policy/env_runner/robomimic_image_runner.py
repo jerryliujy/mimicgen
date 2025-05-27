@@ -22,6 +22,7 @@ from diffusion_policy.env.robomimic.robomimic_image_wrapper import RobomimicImag
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.obs_utils as ObsUtils
+from robosuite.environments import MujocoEnv
 
 
 def create_env(env_meta, shape_meta, enable_render=True):
@@ -80,6 +81,7 @@ class RobomimicImageRunner(BaseImageRunner):
             dataset_path)
         # disable object state observation
         env_meta['env_kwargs']['use_object_obs'] = False
+        env_meta['env_kwargs']['reward_shaping'] = True
 
         rotation_transformer = None
         if abs_action:
@@ -217,6 +219,7 @@ class RobomimicImageRunner(BaseImageRunner):
 
         env = AsyncVectorEnv(env_fns, dummy_env_fn=dummy_env_fn)
         # env = SyncVectorEnv(env_fns)
+        # assert isinstance(env, MujocoEnv)
 
 
         self.env_meta = env_meta

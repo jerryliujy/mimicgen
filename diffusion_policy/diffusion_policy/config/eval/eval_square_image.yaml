@@ -19,13 +19,13 @@ shape_meta: &shape_meta
   action: 
     shape: [7]
 
-checkpoint: data/outputs/square_d2/no_noise/checkpoints/step_2000.ckpt
-output_dir: data/outputs/square_d2/no_noise/eval/eval_no_noise/0
-device: cuda:0
+checkpoint: data/outputs/square_d2/noise_3/checkpoints/step_2500.ckpt
+output_dir: data/outputs/square_d2/noise_3/eval/eval_no_noise/1
+device: cuda:1
 
 task_name: &task_name square
 dataset_type: &dataset_type mimicgen
-dataset_path: &dataset_path data/robomimic/datasets/${task_name}/${dataset_type}/no_noise.hdf5
+dataset_path: &dataset_path data/robomimic/datasets/${task_name}/${dataset_type}/noise_3.hdf5
 abs_action: &abs_action False
 
 horizon: 16
