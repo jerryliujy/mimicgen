@@ -19,9 +19,9 @@ shape_meta: &shape_meta
   action: 
     shape: [7]
 
-task_name: &task_name square
+task_name: &task_name square_d0
 dataset_type: &dataset_type mimicgen
-dataset_path: &dataset_path data/robomimic/datasets/${task.task_name}/${task.dataset_type}/noise_2.hdf5
+dataset_path: &dataset_path data/robomimic/datasets/${task.task_name}/${task.dataset_type}/noise_3.hdf5
 abs_action: &abs_action False
 
 env_runner:
