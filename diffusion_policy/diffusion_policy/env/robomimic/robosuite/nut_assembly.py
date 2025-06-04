@@ -120,6 +120,47 @@ class Square_D0(NutAssemblySquare, SingleArmEnv_MG):
                 reference=np.array((0, 0, 0.82)),
             ),
         )
+        
+    def _apply_robot_perturbations(self):
+        """
+        Apply randomization to robot base position, orientation, and joint positions.
+        This method can be overridden by subclasses to customize perturbation behavior.
+        """
+        # Get current base position
+        xpos = self.robots[0].robot_model.base_xpos_offset["table"](self.table_full_size[0])
+        
+        # Apply position perturbation if method exists
+        if hasattr(self, '_perturb_xpos'):
+            xpos_prev = np.array(xpos).copy()
+            xpos = self._perturb_xpos(xpos)
+            print("Base position before: ", xpos_prev)
+            print("Base position after: ", xpos)
+        
+        self.robots[0].robot_model.set_base_xpos(xpos)
+
+        # Apply orientation perturbation if method exists
+        if hasattr(self, '_perturb_ori'):
+            rotation = self._perturb_ori()
+            print("Generated rotation (roll, pitch, yaw):", rotation)
+            self.robots[0].robot_model.set_base_ori(rotation)
+        
+        # Apply joint position perturbation if method exists
+        if hasattr(self, '_perturb_qpos'):
+            qpos_prev = self.robots[0].init_qpos
+            qpos = self._perturb_qpos(qpos_prev)
+            print("Joint position before: ", qpos_prev)
+            print("Joint position after: ", qpos)
+            self.robots[0].init_qpos = qpos
+            
+    def _load_model(self):
+        """
+        Load model with robot perturbations applied.
+        """
+        # Call superclass implementation
+        super()._load_model()
+        
+        # Apply robot perturbations
+        self._apply_robot_perturbations()
 
 
 class Square_D1(Square_D0):
@@ -244,30 +285,8 @@ class Square_D1(Square_D0):
         # skip superclass implementation 
         SingleArmEnv._load_model(self)
 
-        # Adjust base pose accordingly
-        xpos = self.robots[0].robot_model.base_xpos_offset["table"](self.table_full_size[0])
-
-        #####################################
-        # Add noise to the base position
-        # xpos_prev = np.array(xpos).copy()
-        # xpos = self._perturb_xpos(xpos)
-        
-        # print("Base position before: ", xpos_prev)
-        # print("Base position after: ", xpos)
-        
-        self.robots[0].robot_model.set_base_xpos(xpos)
-
-        # # add rotation to the base position
-        # rotation = self._perturb_ori()
-        # print("Generated rotation (roll, pitch, yaw):", rotation)
-        # self.robots[0].robot_model.set_base_ori(rotation) 
-        
-        # # add noise to the joint position
-        # qpos_prev = self.robots[0].init_qpos
-        # qpos = self._perturb_qpos(qpos_prev)
-        # print("Joint position before: ", qpos_prev)
-        # print("Joint position after: ", qpos)
-        # self.robots[0].init_qpos = qpos 
+        # apply robot perturbations
+        self._apply_robot_perturbations() 
 
         # load model for table top workspace
         mujoco_arena = self._load_arena()
