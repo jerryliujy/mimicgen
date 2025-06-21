@@ -123,6 +123,7 @@ class SingleArmEnv_MG(SingleArmEnv):
         """
         Perturb the position of the robot base.
         """
+        print(f"[DEBUG] Function called with y_noise_max={y_noise_max}")
         xpos = np.array(xpos)
         
         table_size = self.table_full_size
@@ -150,6 +151,7 @@ class SingleArmEnv_MG(SingleArmEnv):
         Returns:
             ndarray: A (3,) array representing (roll, pitch, yaw) in radians.
         """
+        print(f"[DEBUG] Function called with yaw_max={yaw_max if 'yaw_max' in locals() else 'N/A'}")
         noise = np.zeros(3)
         if initialization_noise == "gaussian":
             yaw_noise = np.random.normal(0, yaw_max)

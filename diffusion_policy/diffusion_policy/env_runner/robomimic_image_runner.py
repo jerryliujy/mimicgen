@@ -96,7 +96,7 @@ class RobomimicImageRunner(BaseImageRunner):
             # Robosuite's hard reset causes excessive memory consumption.
             # Disabled to run more envs.
             # https://github.com/ARISE-Initiative/robosuite/blob/92abf5595eddb3a845cd1093703e5a3ccd01e77e/robosuite/environments/base.py#L247-L248
-            robomimic_env.env.hard_reset = False
+            robomimic_env.env.hard_reset = True
             return MultiStepWrapper(
                 VideoRecordingWrapper(
                     RobomimicImageWrapper(
