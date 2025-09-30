@@ -119,10 +119,11 @@ class SingleArmEnv_MG(SingleArmEnv):
             quat=string_to_array("0.683 0.183 0.183 0.683"),
         )
 
-    def _perturb_xpos(self, xpos, x_noise_max=0, y_noise_max=1.0, initialization_noise="uniform"):
+    def _perturb_xpos(self, xpos, x_noise_max=0, y_noise_max=1/3, initialization_noise="uniform"):
         """
         Perturb the position of the robot base.
         """
+        print(f"[DEBUG] Function called with y_noise_max={y_noise_max}")
         xpos = np.array(xpos)
         
         table_size = self.table_full_size
@@ -144,12 +145,13 @@ class SingleArmEnv_MG(SingleArmEnv):
         # xpos[1] = 0.0
         return xpos
     
-    def _perturb_ori(self, yaw_max=np.pi/2, initialization_noise="uniform"):
+    def _perturb_ori(self, yaw_max=np.pi/6, initialization_noise="uniform"):
         """
         Generate random perturbation for the robot base orientation.
         Returns:
             ndarray: A (3,) array representing (roll, pitch, yaw) in radians.
         """
+        print(f"[DEBUG] Function called with yaw_max={yaw_max if 'yaw_max' in locals() else 'N/A'}")
         noise = np.zeros(3)
         if initialization_noise == "gaussian":
             yaw_noise = np.random.normal(0, yaw_max)

@@ -116,7 +116,7 @@ class SingleArmEnv_MG(SingleArmEnv):
             quat=string_to_array("0.683 0.183 0.183 0.683"),
         )
 
-    def _perturb_xpos(self, xpos, x_noise_max=0, y_noise_max=1.0, initialization_noise="uniform"):
+    def _perturb_xpos(self, xpos, x_noise_max=0, y_noise_max=1, initialization_noise="uniform"):
         """
         Perturb the position of the robot base.
         """
