@@ -28,12 +28,10 @@ class InputPadder:
 
 
 class FlowPredictor:
-    def __init__(self, cfg):
-        self.ckpt_path, self.config, self.device = (
-            cfg.flow_predictor.ckpt_path, cfg.flow_predictor.config, cfg.device
-        )
-        if self.device.startswith('cuda') and not torch.cuda.is_available():
-            self.device = 'cpu'
+    def __init__(self):
+        self.ckpt_path = '/home/workspace/diffusion_policy/ckpts/things_288960.pth'
+        self.device = 'cuda:0'
+
 
     def predict(self, img1: np.ndarray, img2: np.ndarray) -> np.ndarray:
         return self.wrapper.predict(img1, img2)
@@ -44,19 +42,18 @@ class FlowPredictor:
 
 class FlowFormerWrapper(FlowPredictor):
     """Wrapper for FlowFormer++ model to predict optical flow."""
-    def __init__(self, cfg):
-        super().__init__(cfg)
-         
-        # sys.path.insert(0, str(base_dir))
+    def __init__(self):
+        super().__init__()
+        
+        flowformer_dir = '/home/workspace/FlowFormerPlusPlus'
+        sys.path.append(flowformer_dir)
         try:
-            from FlowFormerPlusPlus.core.FlowFormer import build_flowformer
-            from FlowFormerPlusPlus.configs.things import get_cfg 
+            from core.FlowFormer import build_flowformer
+            from configs.things import get_cfg   # we use things as default
         except Exception as e:
             raise ImportError('FlowFormer++ not available.')
 
-        flow_cfg = get_cfg() if self.config == 'things' else None
-        if flow_cfg is None:
-            raise ValueError(f'Unsupported config: {self.config}')
+        flow_cfg = get_cfg()
         model = build_flowformer(flow_cfg)
         model = torch.nn.DataParallel(model).to(self.device)
         if not os.path.isfile(self.ckpt_path):
@@ -111,22 +108,21 @@ class FlowFormerWrapper(FlowPredictor):
         return flows
 
 
-def get_flow_predictor(cfg) -> FlowPredictor:
-    if cfg.flow_predictor.name == 'flowformer++':
-        # Use the FlowFormerWrapper to properly initialize model
-        return FlowFormerWrapper(cfg)
-    else:
-        raise ValueError(f"Unsupported flow predictor name: {cfg.flow_predictor.name}")
+def get_flow_predictor() -> FlowPredictor:
+    return FlowFormerWrapper()
 
 
-def generate_flow_from_frames(frames: np.ndarray, flow_estimator, interval: int = 1) -> np.ndarray:
-    T, C, H, W = frames.shape
+def generate_flow_from_frames(frames: np.ndarray, flow_estimator, interval: int = 1, target_size: int = 224) -> np.ndarray:
+    T, H, W, C = frames.shape
     flows = []
     for t in range(T):
         t2 = min(t + interval, T - 1)
-        f1 = frames[t].transpose(1, 2, 0)
-        f2 = frames[t2].transpose(1, 2, 0)
+        f1 = frames[t]
+        f2 = frames[t2]
+        f1 = cv2.resize(f1, dsize=(target_size, target_size), interpolation=cv2.INTER_CUBIC)
+        f2 = cv2.resize(f2, dsize=(target_size, target_size), interpolation=cv2.INTER_CUBIC)
         uv = flow_estimator.predict(f1, f2)
+        uv = cv2.resize(uv, dsize=(H, W), interpolation=cv2.INTER_CUBIC)
         flows.append(uv.transpose(2, 0, 1)) 
     return np.stack(flows, axis=0)
 
