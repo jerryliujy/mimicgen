@@ -40,6 +40,7 @@ policy:
     _target_: diffusion_policy.model.vision.flow_adapter.FlowEncoder
     downscale_factor: 8
     channels: ${policy.down_dims}
+    input_dims: [84, 84]
     nums_rb: 3
     ksize: 3
     sk: False

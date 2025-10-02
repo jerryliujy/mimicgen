@@ -4,6 +4,7 @@ import torch.nn as nn
 from einops import rearrange
 from typing import List, Tuple
 from diffusion_policy.model.common.flovd_module import TemporalTransformerBlock
+from diffusion_policy.common.flow_util import InputPadder
 
 
 
@@ -145,6 +146,7 @@ class FlowEncoder(nn.Module):
     def __init__(self,
                  downscale_factor,
                  channels,
+                 input_dims=(84, 84),
                  nums_rb=3,
                  ksize=3,
                  sk=False,
@@ -156,6 +158,7 @@ class FlowEncoder(nn.Module):
                  temporal_position_encoding_max_len=16,
                  rescale_output_factor=1.0):
         super(FlowEncoder, self).__init__()
+        self.padder = InputPadder(input_dims, factor=downscale_factor)
         self.unshuffle = nn.PixelUnshuffle(downscale_factor)
         self.channels = channels
         self.nums_rb = nums_rb
@@ -169,24 +172,31 @@ class FlowEncoder(nn.Module):
         for i in range(len(channels)):
             conv_layers = nn.ModuleList()
             temporal_attention_layers = nn.ModuleList()
+            in_c = channels[i - 1] if i != 0 else channels[0]
             for j in range(nums_rb):
-                if j == 0 and i != 0:
-                    in_dim = channels[i - 1]
-                    out_dim = int(channels[i] / compression_factor)
-                    conv_layer = ResnetBlock(in_dim, out_dim, down=True, ksize=ksize, sk=sk, use_conv=use_conv)
-                elif j == 0:
-                    in_dim = channels[0]
-                    out_dim = int(channels[i] / compression_factor)
-                    conv_layer = ResnetBlock(in_dim, out_dim, down=False, ksize=ksize, sk=sk, use_conv=use_conv)
-                elif j == nums_rb - 1:
-                    in_dim = int(channels[i] / compression_factor)
-                    out_dim = channels[i]
-                    conv_layer = ResnetBlock(in_dim, out_dim, down=False, ksize=ksize, sk=sk, use_conv=use_conv)
+                if j < nums_rb - 1:
+                    out_c = channels[i] // compression_factor
                 else:
-                    in_dim = int(channels[i] / compression_factor)
-                    out_dim = int(channels[i] / compression_factor)
-                    conv_layer = ResnetBlock(in_dim, out_dim, down=False, ksize=ksize, sk=sk, use_conv=use_conv)
-                temporal_attention_layer = TemporalTransformerBlock(dim=out_dim,
+                    out_c = channels[i]
+                is_downsampling = (j == 0 and i != 0)
+                conv_layer = ResnetBlock(in_c, out_c, down=is_downsampling, ksize=ksize, sk=sk, use_conv=use_conv)
+                # if j == 0 and i != 0:
+                #     in_dim = channels[i - 1]
+                #     out_dim = int(channels[i] / compression_factor)
+                #     conv_layer = ResnetBlock(in_dim, out_dim, down=True, ksize=ksize, sk=sk, use_conv=use_conv)
+                # elif j == 0:
+                #     in_dim = channels[0]
+                #     out_dim = int(channels[i] / compression_factor)
+                #     conv_layer = ResnetBlock(in_dim, out_dim, down=False, ksize=ksize, sk=sk, use_conv=use_conv)
+                # elif j == nums_rb - 1:
+                #     in_dim = int(channels[i] / compression_factor)
+                #     out_dim = channels[i]
+                #     conv_layer = ResnetBlock(in_dim, out_dim, down=False, ksize=ksize, sk=sk, use_conv=use_conv)
+                # else:
+                #     in_dim = int(channels[i] / compression_factor)
+                #     out_dim = int(channels[i] / compression_factor)
+                #     conv_layer = ResnetBlock(in_dim, out_dim, down=False, ksize=ksize, sk=sk, use_conv=use_conv)
+                temporal_attention_layer = TemporalTransformerBlock(dim=out_c,
                                                                     num_attention_heads=temporal_attention_nhead,
                                                                     attention_head_dim=int(out_dim / temporal_attention_nhead),
                                                                     attention_block_types=attention_block_types,
@@ -197,9 +207,12 @@ class FlowEncoder(nn.Module):
                                                                     rescale_output_factor=rescale_output_factor)
                 conv_layers.append(conv_layer)
                 temporal_attention_layers.append(temporal_attention_layer)
+                
+                # update in_c to the output of the current block
+                in_c = out_c
             
             # ZeroConv out block
-            conv_out_block = nn.Conv2d(out_dim, out_dim, 1, 1, 0)
+            conv_out_block = nn.Conv2d(in_c, in_c, 1, 1, 0)
             torch.nn.init.zeros_(conv_out_block.weight)
             torch.nn.init.zeros_(conv_out_block.bias)
             
@@ -218,6 +231,7 @@ class FlowEncoder(nn.Module):
         # unshuffle
         bs = x.shape[0]
         x = rearrange(x, "b f c h w -> (b f) c h w")
+        x = self.padder.pad(x)
         x = self.unshuffle(x)
         # extract features
         features = []

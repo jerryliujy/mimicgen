@@ -8,23 +8,22 @@ import torch.nn.functional as F
 import numpy as np
 import cv2
 
-
 class InputPadder:
-    """Pad images so that dimensions are divisible by 8."""
-    def __init__(self, shape):
-        ht, wd = shape[0], shape[1]
-        pad_ht = (8 - ht % 8) % 8
-        pad_wd = (8 - wd % 8) % 8
-        self.pad = (pad_wd // 2, pad_wd - pad_wd // 2, pad_ht // 2, pad_ht - pad_ht // 2)
+    """Pads images so that dimensions are divisible by a factor."""
+    def __init__(self, dims, factor=8):
+        self.ht, self.wd = dims[-2:]
+        pad_ht = (factor - self.ht % factor) % factor
+        pad_wd = (factor - self.wd % factor) % factor
+        # (pad_left, pad_right, pad_top, pad_bottom)
+        self._pad = (pad_wd // 2, pad_wd - pad_wd // 2, pad_ht // 2, pad_ht - pad_ht // 2)
 
-    def pad_img(self, img: torch.Tensor) -> torch.Tensor:
-        return F.pad(img, self.pad, mode='replicate')
+    def pad(self, x: torch.Tensor) -> torch.Tensor:
+        return F.pad(x, self._pad, mode='replicate')
 
-    def unpad(self, flow: torch.Tensor) -> torch.Tensor:
-        x1, x2, y1, y2 = self.pad
-        # Remove padding to restore original dimensions
-        _, _, h, w = flow.shape
-        return flow[..., y1:h - y2, x1:w - x2]
+    def unpad(self, x: torch.Tensor) -> torch.Tensor:
+        ht, wd = x.shape[-2:]
+        c = (self._pad[2], ht - self._pad[3], self._pad[0], wd - self._pad[1])
+        return x[..., c[0]:c[1], c[2]:c[3]]
 
 
 class FlowPredictor:
@@ -72,8 +71,8 @@ class FlowFormerWrapper(FlowPredictor):
         arr2 = img2[..., ::-1].transpose(2,0,1)
         t2 = torch.from_numpy(np.ascontiguousarray(arr2)).float()[None].to(self.device)
         padder = InputPadder(img1.shape[:2])
-        t1 = padder.pad_img(t1)
-        t2 = padder.pad_img(t2)
+        t1 = padder.pad(t1)
+        t2 = padder.pad(t2)
         outs = self.model(t1, t2)
         # If model returns multiple predictions, take the last one
         if isinstance(outs, (list, tuple)):
@@ -124,7 +123,7 @@ def generate_flow_from_frames(frames: np.ndarray, flow_estimator, interval: int 
         uv = flow_estimator.predict(f1, f2)
         uv = cv2.resize(uv, dsize=(H, W), interpolation=cv2.INTER_CUBIC)
         uv = np.stack([uv[..., 0], uv[..., 1], (uv[..., 0] + uv[..., 1]) / 2], axis=-1)  # add the third channel
-        flows.append(uv.transpose(2, 0, 1)) 
+        flows.append(uv)
     return np.stack(flows, axis=0)
 
 

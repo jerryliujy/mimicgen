@@ -48,8 +48,6 @@ def main(input, output, demo_key, view, fps):
 
     num_frames, height, width, _ = obs_arr.shape
     
-    # Transpose flow from (T, 2, H, W) to (T, H, W, 2) for processing
-    flow_arr = flow_arr.transpose(0, 2, 3, 1)
     flow_arr = flow_arr[..., :2]  # only use the first two channels
 
     # Setup video writer

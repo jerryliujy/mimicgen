@@ -226,9 +226,6 @@ class RobomimicReplayImageDataset(BaseImageDataset):
             obs_dict[key] = data[key][T_slice].astype(np.float32)
             del data[key]
             
-        flow_data = torch.zeros((self.n_obs_steps, 3, 
-            self.shape_meta['flow'][self.flow_keys[0]]['shape'][1], 
-            self.shape_meta['flow'][self.flow_keys[0]]['shape'][2]), dtype=torch.float32)
         if len(self.flow_keys) > 0:
             key = self.flow_keys[0]
             flow_data = np.moveaxis(data[f'flow_{key}'][T_slice], -1, 1).astype(np.float32)
@@ -344,13 +341,17 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                 dtype=this_data.dtype
             )
         
-        def img_copy(zarr_arr, zarr_idx, hdf5_arr, hdf5_idx):
+        def img_copy(zarr_arr, zarr_idx, dataset_path, hdf5_key, hdf5_idx):
             try:
-                zarr_arr[zarr_idx] = hdf5_arr[hdf5_idx]
-                # make sure we can successfully decode
-                _ = zarr_arr[zarr_idx]
+                # Each thread opens its own file handle.
+                with h5py.File(dataset_path, 'r') as file:
+                    hdf5_arr = file[hdf5_key]
+                    zarr_arr[zarr_idx] = hdf5_arr[hdf5_idx]
+                    # make sure we can successfully decode
+                    _ = zarr_arr[zarr_idx]
                 return True
             except Exception as e:
+                print(e)
                 return False
         
         with tqdm(total=n_steps*(len(rgb_keys) + len(flow_keys)), desc="Loading image data", mininterval=1.0) as pbar:
@@ -370,9 +371,9 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                         dtype=np.uint8
                     )
                     for episode_idx in range(len(demos)):
-                        demo = demos[f'demo_{episode_idx}']
-                        hdf5_arr = demo['obs'][key]
-                        for hdf5_idx in range(hdf5_arr.shape[0]):
+                        hdf5_key = f"data/demo_{episode_idx}/obs/{key}"
+                        demo_len = demos[f'demo_{episode_idx}']['obs'][key].shape[0]
+                        for hdf5_idx in range(demo_len):
                             if len(futures) >= max_inflight_tasks:
                                 # limit number of inflight tasks
                                 completed, futures = concurrent.futures.wait(futures, 
@@ -385,7 +386,7 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                             zarr_idx = episode_starts[episode_idx] + hdf5_idx
                             futures.add(
                                 executor.submit(img_copy, 
-                                    img_arr, zarr_idx, hdf5_arr, hdf5_idx))
+                                    img_arr, zarr_idx, dataset_path, hdf5_key, hdf5_idx))
                             
                 for key in flow_keys:
                     shape = tuple(shape_meta['flow'][key]['shape'])
@@ -399,10 +400,10 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                         dtype=np.uint8
                     )
                     for episode_idx in range(len(demos)):
-                        demo = demos[f'demo_{episode_idx}']
                         # Correctly access flow data
-                        hdf5_arr = demo['flow'][key]
-                        for hdf5_idx in range(hdf5_arr.shape[0]):
+                        hdf5_key = f"data/demo_{episode_idx}/flow/{key}"
+                        demo_len = demos[f'demo_{episode_idx}']['flow'][key].shape[0]
+                        for hdf5_idx in range(demo_len):
                             if len(futures) >= max_inflight_tasks:
                                 # limit number of inflight tasks
                                 completed, futures = concurrent.futures.wait(futures, 
@@ -415,7 +416,7 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                             zarr_idx = episode_starts[episode_idx] + hdf5_idx
                             futures.add(
                                 executor.submit(img_copy, 
-                                    flow_arr, zarr_idx, hdf5_arr, hdf5_idx))
+                                    flow_arr, zarr_idx, dataset_path, hdf5_key, hdf5_idx))
 
                 completed, futures = concurrent.futures.wait(futures)
                 for f in completed:
