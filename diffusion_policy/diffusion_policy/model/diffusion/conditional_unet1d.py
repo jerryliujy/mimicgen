@@ -2,6 +2,7 @@ from typing import Union
 import logging
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import einops
 from einops.layers.torch import Rearrange
 
@@ -63,7 +64,12 @@ class ConditionalResidualBlock1D(nn.Module):
             out = out + embed
         out = self.blocks[1](out)
         out = out + self.residual_conv(x)
+
         if pose_cond is not None:
+            # process pose cond
+            pose_cond = pose_cond.reshape(pose_cond.shape[0], pose_cond.shape[1], -1)
+            if pose_cond.size(-1) != out.size(-1):
+                pose_cond = F.adaptive_avg_pool1d(pose_cond, out.size(-1))
             out = out + pose_cond
         return out
 
@@ -213,6 +219,7 @@ class ConditionalUnet1D(nn.Module):
             h_local.append(x)
             x = resnet2(local_cond, global_feature)
             h_local.append(x)
+
         
         x = sample
         h = []
