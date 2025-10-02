@@ -17,12 +17,14 @@ import robomimic.utils.obs_utils as ObsUtils
 import robomimic.models.base_nets as rmbn
 import diffusion_policy.model.vision.crop_randomizer as dmvc
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
+from diffusion_policy.model.vision.flow_adapter import FlowEncoder
 
 
 class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
     def __init__(self, 
             shape_meta: dict,
             noise_scheduler: DDPMScheduler,
+            flow_encoder: FlowEncoder,
             horizon, 
             n_action_steps, 
             n_obs_steps,
@@ -148,6 +150,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
         self.obs_encoder = obs_encoder
         self.model = model
         self.noise_scheduler = noise_scheduler
+        self.flow_encoder = flow_encoder
         self.mask_generator = LowdimMaskGenerator(
             action_dim=action_dim,
             obs_dim=0 if obs_as_global_cond else obs_feature_dim,
@@ -286,6 +289,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
         assert 'valid_mask' not in batch
         nobs = self.normalizer.normalize(batch['obs'])
         nactions = self.normalizer['action'].normalize(batch['action'])
+        nflow = self.normalizer['flow'].normalize(batch['flow']) if batch.get('flow', None) is not None else None
         batch_size = nactions.shape[0]
         horizon = nactions.shape[1]
 
@@ -309,6 +313,11 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
             nobs_features = nobs_features.reshape(batch_size, horizon, -1)
             cond_data = torch.cat([nactions, nobs_features], dim=-1)
             trajectory = cond_data.detach()
+        
+        flow_embedding = None
+        # generate flow embedding
+        if self.flow_encoder is not None and nflow is not None:
+            flow_embedding = self.flow_encoder(nflow)
 
         # generate impainting mask
         condition_mask = self.mask_generator(trajectory.shape)
@@ -334,7 +343,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
         
         # Predict the noise residual
         pred = self.model(noisy_trajectory, timesteps, 
-            local_cond=local_cond, global_cond=global_cond)
+            local_cond=local_cond, global_cond=global_cond, pose_cond=flow_embedding)
 
         pred_type = self.noise_scheduler.config.prediction_type 
         if pred_type == 'epsilon':

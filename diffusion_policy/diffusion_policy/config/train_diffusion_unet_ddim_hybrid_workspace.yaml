@@ -36,6 +36,22 @@ policy:
     steps_offset: 0
     prediction_type: epsilon # or sample
 
+  flow_encoder:
+    _target_: diffusion_policy.model.vision.flow_adapter.FlowEncoder
+    downscale_factor: 8
+    channels: ${policy.down_dims}
+    nums_rb: 3
+    ksize: 3
+    sk: False
+    use_conv: True
+    compression_factor: 1
+    temporal_attention_nhead: 8
+    attention_block_types: ["Temporal_Self"]
+    temporal_position_encoding: True
+    temporal_position_encoding_max_len: 32  #should be >= obs_horizon
+    rescale_output_factor: 1.0
+
+
   horizon: ${horizon}
   n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
   n_obs_steps: ${n_obs_steps}

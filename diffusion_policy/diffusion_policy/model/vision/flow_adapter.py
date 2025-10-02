@@ -144,9 +144,8 @@ class PositionalEncoding(nn.Module):
 class FlowEncoder(nn.Module):
     def __init__(self,
                  downscale_factor,
-                 channels=[320, 640, 1280, 1280],
+                 channels,
                  nums_rb=3,
-                 cin=64,
                  ksize=3,
                  sk=False,
                  use_conv=True,
@@ -160,6 +159,9 @@ class FlowEncoder(nn.Module):
         self.unshuffle = nn.PixelUnshuffle(downscale_factor)
         self.channels = channels
         self.nums_rb = nums_rb
+        # compute input channel after unshuffle
+        cin = 3 * (downscale_factor ** 2)
+        self.encoder_conv_in = conv_nd(2, cin, channels[0], ksize, 1, ksize // 2)
         
         self.encoder_down_conv_blocks = nn.ModuleList()
         self.encoder_down_attention_blocks = nn.ModuleList()
@@ -177,7 +179,7 @@ class FlowEncoder(nn.Module):
                     out_dim = int(channels[i] / compression_factor)
                     conv_layer = ResnetBlock(in_dim, out_dim, down=False, ksize=ksize, sk=sk, use_conv=use_conv)
                 elif j == nums_rb - 1:
-                    in_dim = channels[i] / compression_factor
+                    in_dim = int(channels[i] / compression_factor)
                     out_dim = channels[i]
                     conv_layer = ResnetBlock(in_dim, out_dim, down=False, ksize=ksize, sk=sk, use_conv=use_conv)
                 else:
@@ -204,8 +206,6 @@ class FlowEncoder(nn.Module):
             self.encoder_down_conv_blocks.append(conv_layers)
             self.encoder_down_attention_blocks.append(temporal_attention_layers)
             self.encoder_down_conv_out_blocks.append(conv_out_block)
-
-        self.encoder_conv_in = nn.Conv2d(cin, channels[0], 3, 1, 1)
 
     @property
     def dtype(self) -> torch.dtype:

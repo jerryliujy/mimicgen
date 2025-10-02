@@ -43,7 +43,7 @@ class ConditionalResidualBlock1D(nn.Module):
         self.residual_conv = nn.Conv1d(in_channels, out_channels, 1) \
             if in_channels != out_channels else nn.Identity()
 
-    def forward(self, x, cond):
+    def forward(self, x, cond, pose_cond=None):
         '''
             x : [ batch_size x in_channels x horizon ]
             cond : [ batch_size x cond_dim]
@@ -63,6 +63,8 @@ class ConditionalResidualBlock1D(nn.Module):
             out = out + embed
         out = self.blocks[1](out)
         out = out + self.residual_conv(x)
+        if pose_cond is not None:
+            out = out + pose_cond
         return out
 
 
@@ -173,7 +175,9 @@ class ConditionalUnet1D(nn.Module):
     def forward(self, 
             sample: torch.Tensor, 
             timestep: Union[torch.Tensor, float, int], 
-            local_cond=None, global_cond=None, **kwargs):
+            local_cond=None, global_cond=None, 
+            pose_cond=None,
+            **kwargs):
         """
         x: (B,T,input_dim)
         timestep: (B,) or int, diffusion step
@@ -213,26 +217,30 @@ class ConditionalUnet1D(nn.Module):
         x = sample
         h = []
         for idx, (resnet, resnet2, downsample) in enumerate(self.down_modules):
-            x = resnet(x, global_feature)
+            pose_cond_down = pose_cond[idx] if pose_cond is not None else None
+            x = resnet(x, global_feature, pose_cond=pose_cond_down)
             if idx == 0 and len(h_local) > 0:
                 x = x + h_local[0]
-            x = resnet2(x, global_feature)
+            x = resnet2(x, global_feature, pose_cond=pose_cond_down)
             h.append(x)
             x = downsample(x)
 
         for mid_module in self.mid_modules:
-            x = mid_module(x, global_feature)
+            pose_cond_mid = pose_cond[-1] if pose_cond is not None else None
+            x = mid_module(x, global_feature, pose_cond=pose_cond_mid)
 
         for idx, (resnet, resnet2, upsample) in enumerate(self.up_modules):
             x = torch.cat((x, h.pop()), dim=1)
-            x = resnet(x, global_feature)
+            flow_idx = len(self.down_modules) - idx - 1
+            pose_cond_up = pose_cond[flow_idx] if pose_cond is not None else None
+            x = resnet(x, global_feature, pose_cond=pose_cond_up)
             # The correct condition should be:
             # if idx == (len(self.up_modules)-1) and len(h_local) > 0:
             # However this change will break compatibility with published checkpoints.
             # Therefore it is left as a comment.
             if idx == len(self.up_modules) and len(h_local) > 0:
                 x = x + h_local[1]
-            x = resnet2(x, global_feature)
+            x = resnet2(x, global_feature, pose_cond=pose_cond_up)
             x = upsample(x)
 
         x = self.final_conv(x)

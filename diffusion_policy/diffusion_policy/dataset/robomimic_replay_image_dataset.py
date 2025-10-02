@@ -90,6 +90,7 @@ class RobomimicReplayImageDataset(BaseImageDataset):
 
         rgb_keys = list()
         lowdim_keys = list()
+        flow_keys = list()
         obs_shape_meta = shape_meta['obs']
         for key, attr in obs_shape_meta.items():
             type = attr.get('type', 'low_dim')
@@ -97,6 +98,11 @@ class RobomimicReplayImageDataset(BaseImageDataset):
                 rgb_keys.append(key)
             elif type == 'low_dim':
                 lowdim_keys.append(key)
+        flow_shape_meta = shape_meta.get('flow', dict())
+        for key, attr in flow_shape_meta.items():
+            type = attr.get('type', 'rgb')
+            if type == 'rgb':
+                flow_keys.append(key)
         
         # for key in rgb_keys:
         #     replay_buffer[key].compressor.numthreads=1
@@ -125,6 +131,7 @@ class RobomimicReplayImageDataset(BaseImageDataset):
         self.shape_meta = shape_meta
         self.rgb_keys = rgb_keys
         self.lowdim_keys = lowdim_keys
+        self.flow_keys = flow_keys
         self.abs_action = abs_action
         self.n_obs_steps = n_obs_steps
         self.train_mask = train_mask
@@ -182,6 +189,10 @@ class RobomimicReplayImageDataset(BaseImageDataset):
         # image
         for key in self.rgb_keys:
             normalizer[key] = get_image_range_normalizer()
+            
+        # flow
+        normalizer['flow'] = get_image_range_normalizer()
+        
         return normalizer
 
     def get_all_actions(self) -> torch.Tensor:
@@ -201,6 +212,7 @@ class RobomimicReplayImageDataset(BaseImageDataset):
         T_slice = slice(self.n_obs_steps)
 
         obs_dict = dict()
+        flow_dict = dict()
         for key in self.rgb_keys:
             # move channel last to channel first
             # T,H,W,C
@@ -212,13 +224,22 @@ class RobomimicReplayImageDataset(BaseImageDataset):
         for key in self.lowdim_keys:
             obs_dict[key] = data[key][T_slice].astype(np.float32)
             del data[key]
+            
+        flow_data = torch.zeros((self.n_obs_steps, 3, 
+            self.shape_meta['flow'][self.flow_keys[0]]['shape'][1], 
+            self.shape_meta['flow'][self.flow_keys[0]]['shape'][2]), dtype=torch.float32)
+        if len(self.flow_keys) > 0:
+            key = self.flow_keys[0]
+            flow_data = np.moveaxis(data[f'flow_{key}'][T_slice], -1, 1).astype(np.float32)
+            del data[f'flow_{key}']
 
         torch_data = {
             'obs': dict_apply(obs_dict, torch.from_numpy),
-            'action': torch.from_numpy(data['action'].astype(np.float32))
+            'action': torch.from_numpy(data['action'].astype(np.float32)),
+            'flow': torch.from_numpy(flow_data)
         }
         return torch_data
-
+    
 
 def _convert_actions(raw_actions, abs_action, rotation_transformer):
     actions = raw_actions
@@ -253,8 +274,10 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
     # parse shape_meta
     rgb_keys = list()
     lowdim_keys = list()
+    flow_keys = list()
     # construct compressors and chunks
     obs_shape_meta = shape_meta['obs']
+    flow_shape_meta = shape_meta.get('flow', dict())
     for key, attr in obs_shape_meta.items():
         shape = attr['shape']
         type = attr.get('type', 'low_dim')
@@ -262,6 +285,9 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
             rgb_keys.append(key)
         elif type == 'low_dim':
             lowdim_keys.append(key)
+    for key, attr in flow_shape_meta.items():
+        if attr.get('type', 'rgb') == 'rgb':
+            flow_keys.append(key)
     
     root = zarr.group(store)
     data_group = root.require_group('data', overwrite=True)
@@ -320,7 +346,7 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
             except Exception as e:
                 return False
         
-        with tqdm(total=n_steps*len(rgb_keys), desc="Loading image data", mininterval=1.0) as pbar:
+        with tqdm(total=n_steps*(len(rgb_keys) + len(flow_keys)), desc="Loading image data", mininterval=1.0) as pbar:
             # one chunk per thread, therefore no synchronization needed
             with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
                 futures = set()
@@ -353,6 +379,32 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                             futures.add(
                                 executor.submit(img_copy, 
                                     img_arr, zarr_idx, hdf5_arr, hdf5_idx))
+                            
+                    if key in flow_keys:
+                        flow_arr = data_group.require_dataset(
+                            name=f'flow_{key}',
+                            shape=(n_steps,h,w,c),
+                            chunks=(1,h,w,c),
+                            compressor=this_compressor,
+                            dtype=np.uint8
+                        )
+                        for episode_idx in range(len(demos)):
+                            demo = demos[f'demo_{episode_idx}']
+                            hdf5_arr = demo['flow'][key]
+                            for hdf5_idx in range(hdf5_arr.shape[0]):
+                                if len(futures) >= max_inflight_tasks:
+                                    # limit number of inflight tasks
+                                    completed, futures = concurrent.futures.wait(futures, 
+                                        return_when=concurrent.futures.FIRST_COMPLETED)
+                                    for f in completed:
+                                        if not f.result():
+                                            raise RuntimeError('Failed to encode image!')
+                                    pbar.update(len(completed))
+
+                                zarr_idx = episode_starts[episode_idx] + hdf5_idx
+                                futures.add(
+                                    executor.submit(img_copy, 
+                                        flow_arr, zarr_idx, hdf5_arr, hdf5_idx))
                 completed, futures = concurrent.futures.wait(futures)
                 for f in completed:
                     if not f.result():

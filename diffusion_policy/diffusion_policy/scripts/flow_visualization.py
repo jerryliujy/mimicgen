@@ -50,6 +50,7 @@ def main(input, output, demo_key, view, fps):
     
     # Transpose flow from (T, 2, H, W) to (T, H, W, 2) for processing
     flow_arr = flow_arr.transpose(0, 2, 3, 1)
+    flow_arr = flow_arr[..., :2]  # only use the first two channels
 
     # Setup video writer
     # The output video width will be doubled to accommodate both images
@@ -62,7 +63,7 @@ def main(input, output, demo_key, view, fps):
         original_img_bgr = cv2.cvtColor(obs_arr[i], cv2.COLOR_RGB2BGR)
         
         # Convert flow to a visual representation
-        flow_vis_img = flow_to_image(flow_arr[i])
+        flow_vis_img = flow_to_image(flow_arr[i])  
         
         # Combine images side-by-side
         combined_frame = np.concatenate((original_img_bgr, flow_vis_img), axis=1)

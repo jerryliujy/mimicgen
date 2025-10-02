@@ -123,6 +123,7 @@ def generate_flow_from_frames(frames: np.ndarray, flow_estimator, interval: int 
         f2 = cv2.resize(f2, dsize=(target_size, target_size), interpolation=cv2.INTER_CUBIC)
         uv = flow_estimator.predict(f1, f2)
         uv = cv2.resize(uv, dsize=(H, W), interpolation=cv2.INTER_CUBIC)
+        uv = np.stack([uv[..., 0], uv[..., 1], (uv[..., 0] + uv[..., 1]) / 2], axis=-1)  # add the third channel
         flows.append(uv.transpose(2, 0, 1)) 
     return np.stack(flows, axis=0)
 
