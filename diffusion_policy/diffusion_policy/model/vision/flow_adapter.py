@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
 from typing import List, Tuple
 from diffusion_policy.model.common.flovd_module import TemporalTransformerBlock
@@ -84,39 +85,78 @@ class Downsample(nn.Module):
 
 
 class ResnetBlock(nn.Module):
-
     def __init__(self, in_c, out_c, down, ksize=3, sk=False, use_conv=True):
         super().__init__()
         ps = ksize // 2
-        if in_c != out_c or sk == False:
+        if in_c != out_c or sk is False:
             self.in_conv = nn.Conv2d(in_c, out_c, ksize, 1, ps)
         else:
             self.in_conv = None
         self.block1 = nn.Conv2d(out_c, out_c, 3, 1, 1)
         self.act = nn.ReLU()
         self.block2 = nn.Conv2d(out_c, out_c, ksize, 1, ps)
-        if sk == False:
+        if sk is False:
             self.skep = nn.Conv2d(in_c, out_c, ksize, 1, ps)
         else:
             self.skep = None
 
         self.down = down
-        if self.down == True:
+        if self.down:
             self.down_opt = Downsample(in_c, use_conv=use_conv)
+            self.down_skip = Downsample(in_c, use_conv=use_conv)
+        else:
+            self.down_opt = None
+            self.down_skip = None
 
     def forward(self, x):
-        if self.down == True:
+        residual = x
+        if self.down:
             x = self.down_opt(x)
-        if self.in_conv is not None:  # edit
+            residual = self.down_skip(residual)
+        if self.in_conv is not None:
             x = self.in_conv(x)
 
         h = self.block1(x)
         h = self.act(h)
         h = self.block2(h)
         if self.skep is not None:
-            return h + self.skep(x)
-        else:
-            return h + x
+            residual = self.skep(residual)
+        return h + residual
+
+# class ResnetBlock(nn.Module):
+
+#     def __init__(self, in_c, out_c, down, ksize=3, sk=False, use_conv=True):
+#         super().__init__()
+#         ps = ksize // 2
+#         if in_c != out_c or sk == False:
+#             self.in_conv = nn.Conv2d(in_c, out_c, ksize, 1, ps)
+#         else:
+#             self.in_conv = None
+#         self.block1 = nn.Conv2d(out_c, out_c, 3, 1, 1)
+#         self.act = nn.ReLU()
+#         self.block2 = nn.Conv2d(out_c, out_c, ksize, 1, ps)
+#         if sk == False:
+#             self.skep = nn.Conv2d(in_c, out_c, ksize, 1, ps)
+#         else:
+#             self.skep = None
+
+#         self.down = down
+#         if self.down == True:
+#             self.down_opt = Downsample(in_c, use_conv=use_conv)
+
+#     def forward(self, x):
+#         if self.down == True:
+#             x = self.down_opt(x)
+#         if self.in_conv is not None:  # edit
+#             x = self.in_conv(x)
+
+#         h = self.block1(x)
+#         h = self.act(h)
+#         h = self.block2(h)
+#         if self.skep is not None:
+#             return h + self.skep(x)
+#         else:
+#             return h + x
 
 
 class PositionalEncoding(nn.Module):
@@ -246,5 +286,6 @@ class FlowEncoder(nn.Module):
             
             # ZeroConv out block
             feature = conv_out_block(x)
+            feature = F.interpolate(feature, size=(16, 16), mode='bilinear', align_corners=False)
             features.append(rearrange(feature, '(b f) c h w -> b c f h w', b=bs))
         return features
