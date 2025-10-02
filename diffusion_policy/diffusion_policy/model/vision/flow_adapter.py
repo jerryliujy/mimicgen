@@ -198,7 +198,7 @@ class FlowEncoder(nn.Module):
                 #     conv_layer = ResnetBlock(in_dim, out_dim, down=False, ksize=ksize, sk=sk, use_conv=use_conv)
                 temporal_attention_layer = TemporalTransformerBlock(dim=out_c,
                                                                     num_attention_heads=temporal_attention_nhead,
-                                                                    attention_head_dim=int(out_dim / temporal_attention_nhead),
+                                                                    attention_head_dim=(out_c // temporal_attention_nhead),
                                                                     attention_block_types=attention_block_types,
                                                                     dropout=0.0,
                                                                     cross_attention_dim=None,
