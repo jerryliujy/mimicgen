@@ -9,6 +9,7 @@ import shutil
 import copy
 import json
 import hashlib
+import hydra
 from filelock import FileLock
 from threadpoolctl import threadpool_limits
 import concurrent.futures
@@ -293,6 +294,12 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
     data_group = root.require_group('data', overwrite=True)
     meta_group = root.require_group('meta', overwrite=True)
 
+    try:
+        original_cwd = hydra.utils.get_original_cwd()
+        dataset_path = os.path.join(original_cwd, dataset_path)
+    except (ValueError, ImportError):
+        pass
+
     with h5py.File(dataset_path) as file:
         # count total steps
         demos = file['data']
@@ -380,31 +387,36 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                                 executor.submit(img_copy, 
                                     img_arr, zarr_idx, hdf5_arr, hdf5_idx))
                             
-                    if key in flow_keys:
-                        flow_arr = data_group.require_dataset(
-                            name=f'flow_{key}',
-                            shape=(n_steps,h,w,c),
-                            chunks=(1,h,w,c),
-                            compressor=this_compressor,
-                            dtype=np.uint8
-                        )
-                        for episode_idx in range(len(demos)):
-                            demo = demos[f'demo_{episode_idx}']
-                            hdf5_arr = demo['flow'][key]
-                            for hdf5_idx in range(hdf5_arr.shape[0]):
-                                if len(futures) >= max_inflight_tasks:
-                                    # limit number of inflight tasks
-                                    completed, futures = concurrent.futures.wait(futures, 
-                                        return_when=concurrent.futures.FIRST_COMPLETED)
-                                    for f in completed:
-                                        if not f.result():
-                                            raise RuntimeError('Failed to encode image!')
-                                    pbar.update(len(completed))
+                for key in flow_keys:
+                    shape = tuple(shape_meta['flow'][key]['shape'])
+                    c,h,w = shape
+                    this_compressor = Jpeg2k(level=50)
+                    flow_arr = data_group.require_dataset(
+                        name=f'flow_{key}',
+                        shape=(n_steps,h,w,c),
+                        chunks=(1,h,w,c),
+                        compressor=this_compressor,
+                        dtype=np.uint8
+                    )
+                    for episode_idx in range(len(demos)):
+                        demo = demos[f'demo_{episode_idx}']
+                        # Correctly access flow data
+                        hdf5_arr = demo['flow'][key]
+                        for hdf5_idx in range(hdf5_arr.shape[0]):
+                            if len(futures) >= max_inflight_tasks:
+                                # limit number of inflight tasks
+                                completed, futures = concurrent.futures.wait(futures, 
+                                    return_when=concurrent.futures.FIRST_COMPLETED)
+                                for f in completed:
+                                    if not f.result():
+                                        raise RuntimeError('Failed to encode flow data!')
+                                pbar.update(len(completed))
 
-                                zarr_idx = episode_starts[episode_idx] + hdf5_idx
-                                futures.add(
-                                    executor.submit(img_copy, 
-                                        flow_arr, zarr_idx, hdf5_arr, hdf5_idx))
+                            zarr_idx = episode_starts[episode_idx] + hdf5_idx
+                            futures.add(
+                                executor.submit(img_copy, 
+                                    flow_arr, zarr_idx, hdf5_arr, hdf5_idx))
+
                 completed, futures = concurrent.futures.wait(futures)
                 for f in completed:
                     if not f.result():
