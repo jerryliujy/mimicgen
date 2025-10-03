@@ -67,7 +67,7 @@ class ConditionalResidualBlock1D(nn.Module):
 
         if pose_cond is not None:
             # process pose cond
-            pose_cond = pose_cond.reshape(pose_cond.shape[0], pose_cond.shape[1], -1)
+            pose_cond = pose_cond.reshape(pose_cond.shape[0], pose_cond.shape[1], -1)  # meet three dimensions
             if pose_cond.size(-1) != out.size(-1):
                 pose_cond = F.adaptive_avg_pool1d(pose_cond, out.size(-1))
             out = out + pose_cond
@@ -238,8 +238,11 @@ class ConditionalUnet1D(nn.Module):
 
         for idx, (resnet, resnet2, upsample) in enumerate(self.up_modules):
             x = torch.cat((x, h.pop()), dim=1)
-            flow_idx = len(self.down_modules) - idx - 1
-            pose_cond_up = pose_cond[flow_idx] if pose_cond is not None else None
+            flow_idx = len(self.down_modules) - idx - 2
+            if pose_cond is not None and flow_idx >= 0:
+                pose_cond_up = pose_cond[flow_idx]
+            else:
+                pose_cond_up = None
             x = resnet(x, global_feature, pose_cond=pose_cond_up)
             # The correct condition should be:
             # if idx == (len(self.up_modules)-1) and len(h_local) > 0:

@@ -41,7 +41,7 @@ policy:
     downscale_factor: 8
     channels: ${policy.down_dims}
     input_dims: [84, 84]
-    nums_rb: 3
+    nums_rb: 1
     ksize: 3
     sk: False
     use_conv: True

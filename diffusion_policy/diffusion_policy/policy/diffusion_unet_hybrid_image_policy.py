@@ -173,6 +173,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
 
         print("Diffusion params: %e" % sum(p.numel() for p in self.model.parameters()))
         print("Vision params: %e" % sum(p.numel() for p in self.obs_encoder.parameters()))
+        print("Flow params: %e" % sum(p.numel() for p in self.flow_encoder.parameters()))
     
     # ========= inference  ============
     def conditional_sample(self, 

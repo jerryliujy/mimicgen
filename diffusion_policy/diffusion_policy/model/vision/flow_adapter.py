@@ -220,33 +220,17 @@ class FlowEncoder(nn.Module):
                     out_c = channels[i]
                 is_downsampling = (j == 0 and i != 0)
                 conv_layer = ResnetBlock(in_c, out_c, down=is_downsampling, ksize=ksize, sk=sk, use_conv=use_conv)
-                # if j == 0 and i != 0:
-                #     in_dim = channels[i - 1]
-                #     out_dim = int(channels[i] / compression_factor)
-                #     conv_layer = ResnetBlock(in_dim, out_dim, down=True, ksize=ksize, sk=sk, use_conv=use_conv)
-                # elif j == 0:
-                #     in_dim = channels[0]
-                #     out_dim = int(channels[i] / compression_factor)
-                #     conv_layer = ResnetBlock(in_dim, out_dim, down=False, ksize=ksize, sk=sk, use_conv=use_conv)
-                # elif j == nums_rb - 1:
-                #     in_dim = int(channels[i] / compression_factor)
-                #     out_dim = channels[i]
-                #     conv_layer = ResnetBlock(in_dim, out_dim, down=False, ksize=ksize, sk=sk, use_conv=use_conv)
-                # else:
-                #     in_dim = int(channels[i] / compression_factor)
-                #     out_dim = int(channels[i] / compression_factor)
-                #     conv_layer = ResnetBlock(in_dim, out_dim, down=False, ksize=ksize, sk=sk, use_conv=use_conv)
-                temporal_attention_layer = TemporalTransformerBlock(dim=out_c,
-                                                                    num_attention_heads=temporal_attention_nhead,
-                                                                    attention_head_dim=(out_c // temporal_attention_nhead),
-                                                                    attention_block_types=attention_block_types,
-                                                                    dropout=0.0,
-                                                                    cross_attention_dim=None,
-                                                                    temporal_position_encoding=temporal_position_encoding,
-                                                                    temporal_position_encoding_max_len=temporal_position_encoding_max_len,
-                                                                    rescale_output_factor=rescale_output_factor)
+                # temporal_attention_layer = TemporalTransformerBlock(dim=out_c,
+                #                                                     num_attention_heads=temporal_attention_nhead,
+                #                                                     attention_head_dim=(out_c // temporal_attention_nhead),
+                #                                                     attention_block_types=attention_block_types,
+                #                                                     dropout=0.0,
+                #                                                     cross_attention_dim=None,
+                #                                                     temporal_position_encoding=temporal_position_encoding,
+                #                                                     temporal_position_encoding_max_len=temporal_position_encoding_max_len,
+                #                                                     rescale_output_factor=rescale_output_factor)
                 conv_layers.append(conv_layer)
-                temporal_attention_layers.append(temporal_attention_layer)
+                # temporal_attention_layers.append(temporal_attention_layer)
                 
                 # update in_c to the output of the current block
                 in_c = out_c
@@ -277,15 +261,15 @@ class FlowEncoder(nn.Module):
         features = []
         x = self.encoder_conv_in(x)
         for res_block, attention_block, conv_out_block in zip(self.encoder_down_conv_blocks, self.encoder_down_attention_blocks, self.encoder_down_conv_out_blocks):
-            for res_layer, attention_layer in zip(res_block, attention_block):
+            # for res_layer, attention_layer in zip(res_block, attention_block):
+            for res_layer in res_block:
                 x = res_layer(x)
                 h, w = x.shape[-2:]
                 x = rearrange(x, '(b f) c h w -> (b h w) f c', b=bs)
-                x = attention_layer(x)
+                # x = attention_layer(x)
                 x = rearrange(x, '(b h w) f c -> (b f) c h w', h=h, w=w)
             
             # ZeroConv out block
             feature = conv_out_block(x)
-            feature = F.interpolate(feature, size=(16, 16), mode='bilinear', align_corners=False)
             features.append(rearrange(feature, '(b f) c h w -> b c f h w', b=bs))
         return features
