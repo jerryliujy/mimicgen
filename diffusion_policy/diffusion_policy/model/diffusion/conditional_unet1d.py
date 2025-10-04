@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import einops
 from einops.layers.torch import Rearrange
+from torch.nn import MultiheadAttention
 
 from diffusion_policy.model.diffusion.conv1d_components import (
     Downsample1d, Upsample1d, Conv1dBlock)
@@ -19,7 +20,9 @@ class ConditionalResidualBlock1D(nn.Module):
             cond_dim,
             kernel_size=3,
             n_groups=8,
-            cond_predict_scale=False):
+            cond_predict_scale=False,
+            enable_pose_attention=True,
+            pose_attention_heads=8):
         super().__init__()
 
         self.blocks = nn.ModuleList([
@@ -44,6 +47,14 @@ class ConditionalResidualBlock1D(nn.Module):
         self.residual_conv = nn.Conv1d(in_channels, out_channels, 1) \
             if in_channels != out_channels else nn.Identity()
 
+        self.pose_attn = None
+        self.pose_proj = None
+        if enable_pose_attention:
+            self.pose_attn = MultiheadAttention(
+                embed_dim=out_channels,
+                num_heads=pose_attention_heads,
+                batch_first=True)
+
     def forward(self, x, cond, pose_cond=None):
         '''
             x : [ batch_size x in_channels x horizon ]
@@ -64,8 +75,19 @@ class ConditionalResidualBlock1D(nn.Module):
             out = out + embed
         out = self.blocks[1](out)
         out = out + self.residual_conv(x)
-
-        if pose_cond is not None:
+        
+        if pose_cond is not None and self.pose_attn is not None:
+            pose_cond = pose_cond.reshape(pose_cond.shape[0], pose_cond.shape[1], -1)  # B x C_p x L_p
+            pose_cond = pose_cond.permute(0, 2, 1)  # B x L_p x C_p
+            if pose_cond.size(-1) != self.pose_attn.embed_dim:
+                if self.pose_proj is None:
+                    self.pose_proj = nn.Linear(
+                        pose_cond.size(-1), self.pose_attn.embed_dim).to(pose_cond.device)
+                pose_cond = self.pose_proj(pose_cond)
+            query = out.permute(0, 2, 1)  # B x L x C
+            attn_out, _ = self.pose_attn(query, pose_cond, pose_cond)
+            out = out + attn_out.permute(0, 2, 1)
+        elif pose_cond is not None:
             # process pose cond
             pose_cond = pose_cond.reshape(pose_cond.shape[0], pose_cond.shape[1], -1)  # meet three dimensions
             if pose_cond.size(-1) != out.size(-1):
