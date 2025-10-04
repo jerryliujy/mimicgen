@@ -21,8 +21,8 @@ class ConditionalResidualBlock1D(nn.Module):
             kernel_size=3,
             n_groups=8,
             cond_predict_scale=False,
-            enable_pose_attention=True,
-            pose_attention_heads=8):
+            enable_pose_attention=False,
+            pose_attention_heads=4):
         super().__init__()
 
         self.blocks = nn.ModuleList([
@@ -53,6 +53,7 @@ class ConditionalResidualBlock1D(nn.Module):
             self.pose_attn = MultiheadAttention(
                 embed_dim=out_channels,
                 num_heads=pose_attention_heads,
+                dropout=0.2,
                 batch_first=True)
 
     def forward(self, x, cond, pose_cond=None):
@@ -85,7 +86,9 @@ class ConditionalResidualBlock1D(nn.Module):
                         pose_cond.size(-1), self.pose_attn.embed_dim).to(pose_cond.device)
                 pose_cond = self.pose_proj(pose_cond)
             query = out.permute(0, 2, 1)  # B x L x C
-            attn_out, _ = self.pose_attn(query, pose_cond, pose_cond)
+            query = nn.LayerNorm(query.shape[-1]).to(query.device)(query)
+            pose_cond_norm = nn.LayerNorm(pose_cond.shape[-1]).to(pose_cond.device)(pose_cond)
+            attn_out, _ = self.pose_attn(query, pose_cond_norm, pose_cond_norm)
             out = out + attn_out.permute(0, 2, 1)
         elif pose_cond is not None:
             # process pose cond
@@ -146,12 +149,14 @@ class ConditionalUnet1D(nn.Module):
             ConditionalResidualBlock1D(
                 mid_dim, mid_dim, cond_dim=cond_dim,
                 kernel_size=kernel_size, n_groups=n_groups,
-                cond_predict_scale=cond_predict_scale
+                cond_predict_scale=cond_predict_scale,
+                enable_pose_attention=True
             ),
             ConditionalResidualBlock1D(
                 mid_dim, mid_dim, cond_dim=cond_dim,
                 kernel_size=kernel_size, n_groups=n_groups,
-                cond_predict_scale=cond_predict_scale
+                cond_predict_scale=cond_predict_scale,
+                enable_pose_attention=True
             ),
         ])
 

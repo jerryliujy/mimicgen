@@ -13,9 +13,10 @@ import torch
 from omegaconf import OmegaConf
 import pathlib
 from torch.utils.data import DataLoader
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 import copy
 import random
-import wandb
 import tqdm
 import numpy as np
 import shutil
@@ -34,8 +35,8 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
 class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
     include_keys = ['global_step', 'epoch']
 
-    def __init__(self, cfg: OmegaConf, output_dir=None):
-        super().__init__(cfg, output_dir=output_dir)
+    def __init__(self, cfg: OmegaConf, output_dir=None, local_rank=-1):
+        super().__init__(cfg, output_dir=output_dir, local_rank=local_rank)
 
         # set seed
         seed = cfg.training.seed
@@ -72,12 +73,40 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
         dataset: BaseImageDataset
         dataset = hydra.utils.instantiate(cfg.task.dataset)
         assert isinstance(dataset, BaseImageDataset)
-        train_dataloader = DataLoader(dataset, **cfg.dataloader)
+        train_sampler = None
+        if self.local_rank != -1:
+            train_sampler = torch.utils.data.distributed.DistributedSampler(
+                dataset,
+                num_replicas=dist.get_world_size(),
+                rank=dist.get_rank(),
+                shuffle=True
+            )
+        
+        dataloader_cfg = OmegaConf.to_container(cfg.dataloader, resolve=True)
+        if train_sampler is not None:
+            dataloader_cfg['shuffle'] = False
+        train_dataloader = DataLoader(dataset,
+            sampler=train_sampler,
+            **dataloader_cfg)
         normalizer = dataset.get_normalizer()
 
         # configure validation dataset
         val_dataset = dataset.get_validation_dataset()
-        val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
+        val_sampler = None
+        if self.local_rank != -1:
+            val_sampler = torch.utils.data.distributed.DistributedSampler(
+                val_dataset,
+                num_replicas=dist.get_world_size(),
+                rank=dist.get_rank(),
+                shuffle=False
+            )
+        
+        val_dataloader_cfg = OmegaConf.to_container(cfg.val_dataloader, resolve=True)
+        if val_sampler is not None:
+            val_dataloader_cfg['shuffle'] = False
+        val_dataloader = DataLoader(val_dataset, 
+            sampler=val_sampler,
+            **val_dataloader_cfg)
 
         self.model.set_normalizer(normalizer)
         if cfg.training.use_ema:
@@ -111,16 +140,19 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
         assert isinstance(env_runner, BaseImageRunner)
 
         # configure logging
-        wandb_run = wandb.init(
-            dir=str(self.output_dir),
-            config=OmegaConf.to_container(cfg, resolve=True),
-            **cfg.logging
-        )
-        wandb.config.update(
-            {
-                "output_dir": self.output_dir,
-            }
-        )
+        wandb_run = None
+        if self.is_master:
+            import wandb
+            wandb_run = wandb.init(
+                dir=str(self.output_dir),
+                config=OmegaConf.to_container(cfg, resolve=True),
+                **cfg.logging
+            )
+            wandb.config.update(
+                {
+                    "output_dir": self.output_dir,
+                }
+            )
 
         # configure checkpoint
         topk_manager = TopKCheckpointManager(
@@ -130,7 +162,11 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
 
         # device transfer
         device = torch.device(cfg.training.device)
-        self.model.to(device)
+        if self.local_rank != -1:
+            self.model.to(device)
+            self.model = DDP(self.model, device_ids=[self.local_rank])
+        else:
+            self.model.to(device)
         if self.ema_model is not None:
             self.ema_model.to(device)
         optimizer_to(self.optimizer, device)
@@ -163,7 +199,10 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
                             train_sampling_batch = batch
 
                         # compute loss
-                        raw_loss = self.model.compute_loss(batch)
+                        if self.local_rank != -1:
+                            raw_loss = self.model.module.compute_loss(batch)
+                        else:
+                            raw_loss = self.model.compute_loss(batch)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 
@@ -175,7 +214,7 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
                         
                         # update ema
                         if cfg.training.use_ema:
-                            ema.step(self.model)
+                            ema.step(self.model.module if self.local_rank != -1 else self.model)
 
                         # logging
                         raw_loss_cpu = raw_loss.item()
@@ -191,8 +230,9 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
                         is_last_batch = (batch_idx == (len(train_dataloader)-1))
                         if not is_last_batch:
                             # log of last step is combined with validation and rollout
-                            wandb_run.log(step_log, step=self.global_step)
-                            json_logger.log(step_log)
+                            if self.is_master:
+                                wandb_run.log(step_log, step=self.global_step)
+                                json_logger.log(step_log)
                             self.global_step += 1
 
                         if (cfg.training.max_train_steps is not None) \
@@ -205,7 +245,7 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
                 step_log['train_loss'] = train_loss
 
                 # ========= eval for this epoch ==========
-                policy = self.model
+                policy = self.model.module if self.local_rank != -1 else self.model
                 if cfg.training.use_ema:
                     policy = self.ema_model
                 policy.eval()
@@ -224,7 +264,10 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
                                 leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                             for batch_idx, batch in enumerate(tepoch):
                                 batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
-                                loss = self.model.compute_loss(batch)
+                                if self.local_rank != -1:
+                                    loss = self.model.module.compute_loss(batch)
+                                else:
+                                    loss = self.model.compute_loss(batch)
                                 val_losses.append(loss)
                                 if (cfg.training.max_val_steps is not None) \
                                     and batch_idx >= (cfg.training.max_val_steps-1):
@@ -303,9 +346,9 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
 
                 # end of epoch
                 # log of last step is combined with validation and rollout
-                wandb_run.log(step_log, step=self.global_step)
-                json_logger.log(step_log)
-                self.global_step += 1
+                if self.is_master:
+                    wandb_run.log(step_log, step=self.global_step)
+                    json_logger.log(step_log)
                 self.epoch += 1
 
 @hydra.main(

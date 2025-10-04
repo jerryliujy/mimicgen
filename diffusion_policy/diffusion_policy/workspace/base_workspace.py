@@ -8,16 +8,20 @@ from omegaconf import OmegaConf
 import dill
 import torch
 import threading
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 class BaseWorkspace:
     include_keys = tuple()
     exclude_keys = tuple()
 
-    def __init__(self, cfg: OmegaConf, output_dir: Optional[str]=None):
+    def __init__(self, cfg: OmegaConf, output_dir: Optional[str]=None, local_rank=-1):
         self.cfg = cfg
         self._output_dir = output_dir
         self._saving_thread = None
+        self.local_rank = local_rank
+        self.is_master = local_rank < 1
 
     @property
     def output_dir(self):
@@ -56,10 +60,14 @@ class BaseWorkspace:
             if hasattr(value, 'state_dict') and hasattr(value, 'load_state_dict'):
                 # modules, optimizers and samplers etc
                 if key not in exclude_keys:
+                    state_dict = value.state_dict()
+                    if isinstance(value, DDP):
+                        state_dict = value.module.state_dict()
+
                     if use_thread:
-                        payload['state_dicts'][key] = _copy_to_cpu(value.state_dict())
+                        payload['state_dicts'][key] = _copy_to_cpu(state_dict)
                     else:
-                        payload['state_dicts'][key] = value.state_dict()
+                        payload['state_dicts'][key] = state_dict
             elif key in include_keys:
                 payload['pickles'][key] = dill.dumps(value)
         if use_thread:
