@@ -1,4 +1,4 @@
-name: square_image
+name: coffee_image
 
 shape_meta: &shape_meta
   # acceptable types: rgb, low_dim
@@ -18,38 +18,29 @@ shape_meta: &shape_meta
       shape: [2]
   action: 
     shape: [7]
+  flow:
+    agentview_image:
+      shape: [3, 84, 84]
+      type: rgb
 
-checkpoint: data/outputs/2025.10.10/13.09.40_train_diffusion_unet_hybrid_square_image/checkpoints/step_500.ckpt
-output_dir: data/outputs/2025.10.10/13.09.40_train_diffusion_unet_hybrid_square_image/eval/eval_no_noise/step_500
-device: cuda:0
-
-task_name: &task_name square_d0
+task_name: &task_name coffee_d0
 dataset_type: &dataset_type mimicgen
-dataset_path: &dataset_path data/robomimic/datasets/${task_name}/${dataset_type}/no_noise.hdf5
+dataset_path: &dataset_path data/robomimic/datasets/${task.task_name}/${task.dataset_type}/no_noise_flow.hdf5
 abs_action: &abs_action False
-
-horizon: 16
-n_obs_steps: 2
-n_action_steps: 8
-n_latency_steps: 0
-dataset_obs_steps: ${n_obs_steps}
-past_action_visible: False
-keypoint_visible_rate: 1.0
-obs_as_global_cond: True
 
 env_runner:
   _target_: diffusion_policy.env_runner.robomimic_image_runner.RobomimicImageRunner
   dataset_path: *dataset_path
   shape_meta: *shape_meta
   # costs 1GB per env
-  n_train: 3
-  n_train_vis: 1
+  n_train: 0
+  n_train_vis: 0
   train_start_idx: 0
-  n_test: 20
-  n_test_vis: 2
+  n_test: 1
+  n_test_vis: 1
   test_start_seed: 100000
   # use python's eval function as resolver, single-quoted string as argument
-  max_steps: ${eval:'500 if "${dataset_type}" == "mh" else 400'}
+  max_steps: ${eval:'500 if "${task.dataset_type}" == "mh" else 400'}
   n_obs_steps: ${n_obs_steps}
   n_action_steps: ${n_action_steps}
   render_obs_key: 'agentview_image'
@@ -58,6 +49,20 @@ env_runner:
   past_action: ${past_action_visible}
   abs_action: *abs_action
   tqdm_interval_sec: 1.0
-  n_envs: 2
+  n_envs: 1
 # evaluation at this config requires a 16 core 64GB instance.
 
+dataset:
+  _target_: diffusion_policy.dataset.robomimic_replay_image_dataset.RobomimicReplayImageDataset
+  shape_meta: *shape_meta
+  dataset_path: *dataset_path
+  horizon: ${horizon}
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+  pad_after: ${eval:'${n_action_steps}-1'}
+  n_obs_steps: ${dataset_obs_steps}
+  abs_action: *abs_action
+  rotation_rep: 'rotation_6d'
+  use_legacy_normalizer: False
+  use_cache: True
+  seed: 42
+  val_ratio: 0.02

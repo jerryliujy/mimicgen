@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: square_image
+  - task: coffee_image
 
 name: train_diffusion_unet_hybrid
 _target_: diffusion_policy.workspace.train_diffusion_unet_hybrid_workspace.TrainDiffusionUnetHybridWorkspace
@@ -130,6 +130,7 @@ logging:
   resume: True
   mode: online
   name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  # name: 2025.10.05-00.04.07_${name}_${task_name}_${exp_name}
   tags: ["${name}", "${task_name}", "${exp_name}"]
   id: null
   group: null
@@ -147,13 +148,17 @@ checkpoint:
 
 multi_run:
   run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  # run_dir: data/outputs/2025.10.05/00.04.07_${name}_${task_name}
   wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  # wandb_name_base: 2025.10.05-00.04.07_${name}_${task_name}_${exp_name}
 
 hydra:
   job:
     override_dirname: ${name}
   run:
     dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    # dir: data/outputs/2025.10.05/00.04.07_${name}_${task_name}
   sweep:
     dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    # dir: data/outputs/2025.10.05/00.04.07_${name}_${task_name}
     subdir: ${hydra.job.num}

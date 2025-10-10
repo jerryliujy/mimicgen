@@ -22,7 +22,7 @@ class ConditionalResidualBlock1D(nn.Module):
             n_groups=8,
             cond_predict_scale=False,
             enable_pose_attention=False,
-            pose_attention_heads=4):
+            pose_attention_heads=8):
         super().__init__()
 
         self.blocks = nn.ModuleList([
@@ -136,12 +136,14 @@ class ConditionalUnet1D(nn.Module):
                 ConditionalResidualBlock1D(
                     dim_in, dim_out, cond_dim=cond_dim, 
                     kernel_size=kernel_size, n_groups=n_groups,
-                    cond_predict_scale=cond_predict_scale),
+                    cond_predict_scale=cond_predict_scale,
+                ),
                 # up encoder
                 ConditionalResidualBlock1D(
                     dim_in, dim_out, cond_dim=cond_dim, 
                     kernel_size=kernel_size, n_groups=n_groups,
-                    cond_predict_scale=cond_predict_scale)
+                    cond_predict_scale=cond_predict_scale,
+                )
             ])
 
         mid_dim = all_dims[-1]
@@ -167,11 +169,13 @@ class ConditionalUnet1D(nn.Module):
                 ConditionalResidualBlock1D(
                     dim_in, dim_out, cond_dim=cond_dim, 
                     kernel_size=kernel_size, n_groups=n_groups,
-                    cond_predict_scale=cond_predict_scale),
+                    cond_predict_scale=cond_predict_scale,
+                ),
                 ConditionalResidualBlock1D(
                     dim_out, dim_out, cond_dim=cond_dim, 
                     kernel_size=kernel_size, n_groups=n_groups,
-                    cond_predict_scale=cond_predict_scale),
+                    cond_predict_scale=cond_predict_scale,
+                ),
                 Downsample1d(dim_out) if not is_last else nn.Identity()
             ]))
 

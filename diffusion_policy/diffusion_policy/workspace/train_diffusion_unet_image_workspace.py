@@ -328,6 +328,8 @@ class TrainDiffusionUnetImageWorkspace(BaseWorkspace):
                     json_logger.log(step_log)
                 
                 self.epoch += 1
+                if self.epoch >= cfg.training.num_epochs:
+                    break
 
 @hydra.main(
     version_base=None,

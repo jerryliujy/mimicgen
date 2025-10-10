@@ -71,6 +71,11 @@ To reproduce our simulation benchmark results, install our conda environment on 
 $ sudo apt install -y libosmesa6-dev libgl1-mesa-glx libglfw3 patchelf
 ```
 
+For mimicgen
+```console
+$ pip install -e /home/workspace/mimicgen
+```
+
 We recommend [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge) instead of the standard anaconda distribution for faster installation: 
 ```console
 $ mamba env create -f conda_environment.yaml

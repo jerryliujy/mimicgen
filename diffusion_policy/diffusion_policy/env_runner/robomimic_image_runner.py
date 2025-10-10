@@ -81,7 +81,7 @@ class RobomimicImageRunner(BaseImageRunner):
             dataset_path)
         # disable object state observation
         env_meta['env_kwargs']['use_object_obs'] = False
-        env_meta['env_kwargs']['reward_shaping'] = True
+        env_meta['env_kwargs']['reward_shaping'] = False  # set it true to use dense reward
 
         rotation_transformer = None
         if abs_action:
