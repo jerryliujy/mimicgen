@@ -1,4 +1,4 @@
-name: coffee_image
+name: stack_image
 
 shape_meta: &shape_meta
   # acceptable types: rgb, low_dim
@@ -23,9 +23,9 @@ shape_meta: &shape_meta
       shape: [3, 84, 84]
       type: rgb
 
-task_name: &task_name coffee_d0
+task_name: &task_name stack_d0
 dataset_type: &dataset_type mimicgen
-dataset_path: &dataset_path data/robomimic/datasets/${task.task_name}/${task.dataset_type}/no_noise_test.hdf5
+dataset_path: &dataset_path data/robomimic/datasets/${task.task_name}/${task.dataset_type}/no_noise_flow.hdf5
 abs_action: &abs_action False
 
 env_runner:

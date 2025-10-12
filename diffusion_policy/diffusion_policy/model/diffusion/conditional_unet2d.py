@@ -1,33 +1,29 @@
 from typing import Union
 import logging
+import einops
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import einops
 from einops.layers.torch import Rearrange
-from torch.nn import MultiheadAttention
 
-from diffusion_policy.model.diffusion.conv1d_components import (
-    Downsample1d, Upsample1d, Conv1dBlock)
+from diffusion_policy.model.diffusion.conv2d_components import *
 from diffusion_policy.model.diffusion.positional_embedding import SinusoidalPosEmb
 
 logger = logging.getLogger(__name__)
 
-class ConditionalResidualBlock1D(nn.Module):
+class ConditionalResidualBlock2D(nn.Module):
     def __init__(self, 
             in_channels, 
             out_channels, 
             cond_dim,
             kernel_size=3,
             n_groups=8,
-            cond_predict_scale=False,
-            enable_pose_attention=False,
-            pose_attention_heads=4):
+            cond_predict_scale=False):
         super().__init__()
 
         self.blocks = nn.ModuleList([
-            Conv1dBlock(in_channels, out_channels, kernel_size, n_groups=n_groups),
-            Conv1dBlock(out_channels, out_channels, kernel_size, n_groups=n_groups),
+            Conv2dBlock(in_channels, out_channels, kernel_size, n_groups=n_groups),
+            Conv2dBlock(out_channels, out_channels, kernel_size, n_groups=n_groups),
         ])
 
         # FiLM modulation https://arxiv.org/abs/1709.07871
@@ -46,15 +42,6 @@ class ConditionalResidualBlock1D(nn.Module):
         # make sure dimensions compatible
         self.residual_conv = nn.Conv1d(in_channels, out_channels, 1) \
             if in_channels != out_channels else nn.Identity()
-
-        self.pose_attn = None
-        self.pose_proj = None
-        if enable_pose_attention:
-            self.pose_attn = MultiheadAttention(
-                embed_dim=out_channels,
-                num_heads=pose_attention_heads,
-                dropout=0.2,
-                batch_first=True)
 
     def forward(self, x, cond, pose_cond=None):
         '''
@@ -76,30 +63,10 @@ class ConditionalResidualBlock1D(nn.Module):
             out = out + embed
         out = self.blocks[1](out)
         out = out + self.residual_conv(x)
-        
-        if pose_cond is not None and self.pose_attn is not None:
-            pose_cond = pose_cond.reshape(pose_cond.shape[0], pose_cond.shape[1], -1)  # B x C_p x L_p
-            pose_cond = pose_cond.permute(0, 2, 1)  # B x L_p x C_p
-            if pose_cond.size(-1) != self.pose_attn.embed_dim:
-                if self.pose_proj is None:
-                    self.pose_proj = nn.Linear(
-                        pose_cond.size(-1), self.pose_attn.embed_dim).to(pose_cond.device)
-                pose_cond = self.pose_proj(pose_cond)
-            query = out.permute(0, 2, 1)  # B x L x C
-            query = nn.LayerNorm(query.shape[-1]).to(query.device)(query)
-            pose_cond_norm = nn.LayerNorm(pose_cond.shape[-1]).to(pose_cond.device)(pose_cond)
-            attn_out, _ = self.pose_attn(query, pose_cond_norm, pose_cond_norm)
-            out = out + attn_out.permute(0, 2, 1)
-        elif pose_cond is not None:
-            # process pose cond
-            pose_cond = pose_cond.reshape(pose_cond.shape[0], pose_cond.shape[1], -1)  # meet three dimensions
-            if pose_cond.size(-1) != out.size(-1):
-                pose_cond = F.adaptive_avg_pool1d(pose_cond, out.size(-1))
-            out = out + pose_cond
         return out
 
-
-class ConditionalUnet1D(nn.Module):
+        
+class ConditionalUnet2D(nn.Module):
     def __init__(self, 
         input_dim,
         local_cond_dim=None,
@@ -133,13 +100,13 @@ class ConditionalUnet1D(nn.Module):
             dim_in = local_cond_dim
             local_cond_encoder = nn.ModuleList([
                 # down encoder
-                ConditionalResidualBlock1D(
+                ConditionalResidualBlock2D(
                     dim_in, dim_out, cond_dim=cond_dim, 
                     kernel_size=kernel_size, n_groups=n_groups,
                     cond_predict_scale=cond_predict_scale,
                 ),
                 # up encoder
-                ConditionalResidualBlock1D(
+                ConditionalResidualBlock2D(
                     dim_in, dim_out, cond_dim=cond_dim, 
                     kernel_size=kernel_size, n_groups=n_groups,
                     cond_predict_scale=cond_predict_scale,
@@ -148,17 +115,15 @@ class ConditionalUnet1D(nn.Module):
 
         mid_dim = all_dims[-1]
         self.mid_modules = nn.ModuleList([
-            ConditionalResidualBlock1D(
+            ConditionalResidualBlock2D(
                 mid_dim, mid_dim, cond_dim=cond_dim,
                 kernel_size=kernel_size, n_groups=n_groups,
-                cond_predict_scale=cond_predict_scale,
-                enable_pose_attention=True
+                cond_predict_scale=cond_predict_scale
             ),
-            ConditionalResidualBlock1D(
+            ConditionalResidualBlock2D(
                 mid_dim, mid_dim, cond_dim=cond_dim,
                 kernel_size=kernel_size, n_groups=n_groups,
-                cond_predict_scale=cond_predict_scale,
-                enable_pose_attention=True
+                cond_predict_scale=cond_predict_scale
             ),
         ])
 
@@ -166,37 +131,37 @@ class ConditionalUnet1D(nn.Module):
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (len(in_out) - 1)
             down_modules.append(nn.ModuleList([
-                ConditionalResidualBlock1D(
+                ConditionalResidualBlock2D(
                     dim_in, dim_out, cond_dim=cond_dim, 
                     kernel_size=kernel_size, n_groups=n_groups,
                     cond_predict_scale=cond_predict_scale,
                 ),
-                ConditionalResidualBlock1D(
+                ConditionalResidualBlock2D(
                     dim_out, dim_out, cond_dim=cond_dim, 
                     kernel_size=kernel_size, n_groups=n_groups,
                     cond_predict_scale=cond_predict_scale,
                 ),
-                Downsample1d(dim_out) if not is_last else nn.Identity()
+                Downsample2d(dim_out) if not is_last else nn.Identity()
             ]))
 
         up_modules = nn.ModuleList([])
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (len(in_out) - 1)
             up_modules.append(nn.ModuleList([
-                ConditionalResidualBlock1D(
+                ConditionalResidualBlock2D(
                     dim_out*2, dim_in, cond_dim=cond_dim,
                     kernel_size=kernel_size, n_groups=n_groups,
                     cond_predict_scale=cond_predict_scale),
-                ConditionalResidualBlock1D(
+                ConditionalResidualBlock2D(
                     dim_in, dim_in, cond_dim=cond_dim,
                     kernel_size=kernel_size, n_groups=n_groups,
                     cond_predict_scale=cond_predict_scale),
-                Upsample1d(dim_in) if not is_last else nn.Identity()
+                Upsample2d(dim_in) if not is_last else nn.Identity()
             ]))
         
         final_conv = nn.Sequential(
-            Conv1dBlock(start_dim, start_dim, kernel_size=kernel_size),
-            nn.Conv1d(start_dim, input_dim, 1),
+            Conv2dBlock(start_dim, start_dim, kernel_size=kernel_size),
+            nn.Conv2d(start_dim, input_dim, 1),
         )
 
         self.diffusion_step_encoder = diffusion_step_encoder

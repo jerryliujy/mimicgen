@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - task: coffee_image
+  - task: stack_image
 
 name: train_diffusion_unet_hybrid
 _target_: diffusion_policy.workspace.train_diffusion_unet_hybrid_workspace.TrainDiffusionUnetHybridWorkspace

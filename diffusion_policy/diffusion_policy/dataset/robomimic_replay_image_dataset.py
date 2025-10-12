@@ -225,17 +225,24 @@ class RobomimicReplayImageDataset(BaseImageDataset):
         for key in self.lowdim_keys:
             obs_dict[key] = data[key][T_slice].astype(np.float32)
             del data[key]
-            
+        
+        flow_data = None
         if len(self.flow_keys) > 0:
             key = self.flow_keys[0]
             flow_data = np.moveaxis(data[f'flow_{key}'][T_slice], -1, 1).astype(np.float32)
             del data[f'flow_{key}']
-
-        torch_data = {
-            'obs': dict_apply(obs_dict, torch.from_numpy),
-            'action': torch.from_numpy(data['action'].astype(np.float32)),
-            'flow': torch.from_numpy(flow_data)
-        }
+        
+        if flow_data is not None:
+            torch_data = {
+                'obs': dict_apply(obs_dict, torch.from_numpy),
+                'action': torch.from_numpy(data['action'].astype(np.float32)),
+                'flow': torch.from_numpy(flow_data)
+            }
+        else:
+            torch_data = {
+                'obs': dict_apply(obs_dict, torch.from_numpy),
+                'action': torch.from_numpy(data['action'].astype(np.float32))
+            }
         return torch_data
     
 
