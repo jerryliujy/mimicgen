@@ -23,6 +23,7 @@ import torch.distributed as dist
 # allows arbitrary python code execution in configs using the ${eval:''} resolver
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
+# torchrun --nproc_per_node=2 --master_port=29500 train.py --config-name=train_diffusion_unet_ddim_hybrid_workspace
 @hydra.main(
     version_base=None,
     config_path=str(pathlib.Path(__file__).parent.joinpath(

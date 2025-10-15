@@ -19,8 +19,8 @@ shape_meta: &shape_meta
   action: 
     shape: [7]
 
-checkpoint: data/outputs/2025.10.10/13.09.40_train_diffusion_unet_hybrid_square_image/checkpoints/step_500.ckpt
-output_dir: data/outputs/2025.10.10/13.09.40_train_diffusion_unet_hybrid_square_image/eval/eval_no_noise/step_500
+checkpoint: data/outputs/2025.10.16/00.37.44_train_diffusion_unet_hybrid_square_image/checkpoints/latest.ckpt
+output_dir: data/outputs/2025.10.16/00.37.44_train_diffusion_unet_hybrid_square_image/eval/eval_no_noise/latest
 device: cuda:0
 
 task_name: &task_name square_d0
