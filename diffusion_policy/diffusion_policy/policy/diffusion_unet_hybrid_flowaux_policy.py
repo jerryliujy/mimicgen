@@ -17,14 +17,13 @@ import robomimic.utils.obs_utils as ObsUtils
 import robomimic.models.base_nets as rmbn
 import diffusion_policy.model.vision.crop_randomizer as dmvc
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
+from diffusion_policy.model.diffusion.conv2d_components import make_mlp
 
 
 class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
     def __init__(self, 
             shape_meta: dict,
             noise_scheduler: DDPMScheduler,
-            flow_decoder,
-            action_decoder,
             horizon, 
             n_action_steps, 
             n_obs_steps,
@@ -38,6 +37,12 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             cond_predict_scale=True,
             obs_encoder_group_norm=False,
             eval_fixed_crop=False,
+            flow_decoder_layers=[512, 256, 128, 64],
+            flow_decoder_activation=nn.Mish,
+            flow_loss_w=0.1,
+            action_decoder_layers=[512, 256, 128, 64],
+            action_decoder_activation=nn.Mish,
+            action_loss_w=0.1,
             # parameters passed to step
             **kwargs):
         super().__init__()
@@ -150,7 +155,8 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         self.obs_encoder = obs_encoder
         self.model = model
         self.noise_scheduler = noise_scheduler
-        self.flow_encoder = flow_encoder
+        self.flow_decoder = make_mlp(flow_decoder_layers, flow_decoder_activation)
+        self.action_decoder = make_mlp(action_decoder_layers, action_decoder_activation) 
         self.mask_generator = LowdimMaskGenerator(
             action_dim=action_dim,
             obs_dim=0 if obs_as_global_cond else obs_feature_dim,
@@ -165,6 +171,8 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         self.n_action_steps = n_action_steps
         self.n_obs_steps = n_obs_steps
         self.obs_as_global_cond = obs_as_global_cond
+        self.action_loss_w = action_loss_w
+        self.flow_loss_w = flow_loss_w
         self.kwargs = kwargs
 
         if num_inference_steps is None:
@@ -264,6 +272,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             local_cond=local_cond,
             global_cond=global_cond,
             **self.kwargs)
+        nsample = self.action_decoder(nsample)
         
         # unnormalize prediction
         naction_pred = nsample[...,:Da]
@@ -313,11 +322,6 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             nobs_features = nobs_features.reshape(batch_size, horizon, -1)
             cond_data = torch.cat([nactions, nobs_features], dim=-1)
             trajectory = cond_data.detach()
-        
-        flow_embedding = None
-        # generate flow embedding
-        if self.flow_encoder is not None and nflow is not None:
-            flow_embedding = self.flow_encoder(nflow)
 
         # generate impainting mask
         condition_mask = self.mask_generator(trajectory.shape)
@@ -343,18 +347,28 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         
         # Predict the noise residual
         pred = self.model(noisy_trajectory, timesteps, 
-            local_cond=local_cond, global_cond=global_cond, pose_cond=flow_embedding)
+            local_cond=local_cond, global_cond=global_cond)
 
         pred_type = self.noise_scheduler.config.prediction_type 
         if pred_type == 'epsilon':
             target = noise
+            pred_emb = noisy_trajectory + pred
         elif pred_type == 'sample':
             target = trajectory
+            pred_emb = pred
         else:
             raise ValueError(f"Unsupported prediction type {pred_type}")
+        
+        pred_action = self.action_decoder(pred_emb)
+        pred_flow = self.flow_decoder(pred_emb)
+        action_loss = F.mse_loss(pred_action, nactions, reduction='none')
+        flow_loss = F.mse_loss(pred_flow, nflow, reduction='none') if nflow is not None else 0.0
+        action_loss = reduce(action_loss, 'b ... -> b (...)', 'mean')
+        flow_loss = reduce(flow_loss, 'b ... -> b (...)', 'mean')
 
         loss = F.mse_loss(pred, target, reduction='none')
         loss = loss * loss_mask.type(loss.dtype)
         loss = reduce(loss, 'b ... -> b (...)', 'mean')
+        loss = loss + self.action_loss_w * action_loss + self.flow_loss_w * flow_loss
         loss = loss.mean()
         return loss

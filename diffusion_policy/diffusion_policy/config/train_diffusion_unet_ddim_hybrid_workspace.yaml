@@ -19,7 +19,7 @@ keypoint_visible_rate: 1.0
 obs_as_global_cond: True
 
 policy:
-  _target_: diffusion_policy.policy.diffusion_unet_hybrid_image_policy.DiffusionUnetHybridImagePolicy
+  _target_: diffusion_policy.policy.diffusion_unet_hybrid_image_policy.DiffusionUnetHybridFlowauxPolicy
 
   shape_meta: ${shape_meta}
   
@@ -36,21 +36,21 @@ policy:
     steps_offset: 0
     prediction_type: epsilon # or sample
 
-  flow_encoder:
-    _target_: diffusion_policy.model.vision.flow_adapter.FlowEncoder
-    downscale_factor: 8
-    channels: ${policy.down_dims}
-    input_dims: [84, 84]
-    nums_rb: 1
-    ksize: 3
-    sk: False
-    use_conv: True
-    compression_factor: 1
-    temporal_attention_nhead: 8
-    attention_block_types: ["Temporal_Self"]
-    temporal_position_encoding: True
-    temporal_position_encoding_max_len: 32  #should be >= obs_horizon
-    rescale_output_factor: 1.0
+  # flow_encoder:
+  #   _target_: diffusion_policy.model.vision.flow_adapter.FlowEncoder
+  #   downscale_factor: 8
+  #   channels: ${policy.down_dims}
+  #   input_dims: [84, 84]
+  #   nums_rb: 1
+  #   ksize: 3
+  #   sk: False
+  #   use_conv: True
+  #   compression_factor: 1
+  #   temporal_attention_nhead: 8
+  #   attention_block_types: ["Temporal_Self"]
+  #   temporal_position_encoding: True
+  #   temporal_position_encoding_max_len: 32  #should be >= obs_horizon
+  #   rescale_output_factor: 1.0
 
 
   horizon: ${horizon}
@@ -67,6 +67,12 @@ policy:
   cond_predict_scale: True
   obs_encoder_group_norm: True
   eval_fixed_crop: True
+  flow_decoder_layers: [512, 256, 128, 64]
+  flow_decoder_activation: torch.nn.ReLU
+  flow_loss_w: 0.1
+  action_decoder_layers: [512, 256, 128, 64]
+  action_decoder_activation: torch.nn.ReLU
+  action_loss_w: 0.1
 
   # scheduler.step params
   # predict_epsilon: True

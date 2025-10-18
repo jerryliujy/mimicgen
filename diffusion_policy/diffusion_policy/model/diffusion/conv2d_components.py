@@ -1,6 +1,15 @@
 import torch
 import torch.nn as nn
 
+def make_mlp(dimensions, activation=nn.Mish, dropout=0.1):
+    layers = []
+    for i in range(len(dimensions) - 1):
+        layers.append(nn.Linear(dimensions[i], dimensions[i+1]))
+        if i < len(dimensions) - 2:
+            layers.append(activation())
+            layers.append(nn.Dropout(dropout))
+    return nn.Sequential(*layers)
+
 class Downsample2d(nn.Module):
     def __init__(self, dim):
         super().__init__()
