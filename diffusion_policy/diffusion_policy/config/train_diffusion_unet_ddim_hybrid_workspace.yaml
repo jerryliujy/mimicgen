@@ -36,6 +36,19 @@ policy:
     steps_offset: 0
     prediction_type: epsilon # or sample
 
+  flow_decoder:
+    _target_: diffusion_policy.model.diffusion.conv2d_components.Conv2dUpsampler
+    channels: [1024, 512, 256, 128, 64, 2]
+    kernel_size: 5
+
+  action_decoder:
+    _target_: diffusion_policy.model.diffusion.conv2d_components.MLP
+    channels: [1024, 512, 256, 128, 64, '${horizon}*${shape_meta.action_dim}']
+
+  action_encoder:
+    _target_: diffusion_policy.model.diffusion.conv2d_components.MLP
+    channels: [ '${horizon}*${shape_meta.action_dim}', 64, 128, 256, 512, 1024]
+
   # flow_encoder:
   #   _target_: diffusion_policy.model.vision.flow_adapter.FlowEncoder
   #   downscale_factor: 8
@@ -67,11 +80,7 @@ policy:
   cond_predict_scale: True
   obs_encoder_group_norm: True
   eval_fixed_crop: True
-  flow_decoder_layers: [512, 256, 128, 64]
-  flow_decoder_activation: torch.nn.ReLU
   flow_loss_w: 0.1
-  action_decoder_layers: [512, 256, 128, 64]
-  action_decoder_activation: torch.nn.ReLU
   action_loss_w: 0.1
 
   # scheduler.step params

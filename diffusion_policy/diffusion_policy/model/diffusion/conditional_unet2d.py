@@ -40,16 +40,16 @@ class ConditionalResidualBlock2D(nn.Module):
         )
 
         # make sure dimensions compatible
-        self.residual_conv = nn.Conv1d(in_channels, out_channels, 1) \
+        self.residual_conv = nn.Conv2d(in_channels, out_channels, 1) \
             if in_channels != out_channels else nn.Identity()
 
-    def forward(self, x, cond, pose_cond=None):
+    def forward(self, x, cond):
         '''
-            x : [ batch_size x in_channels x horizon ]
+            x : [ batch_size x in_channels x height x width ]
             cond : [ batch_size x cond_dim]
 
             returns:
-            out : [ batch_size x out_channels x horizon ]
+            out : [ batch_size x out_channels x height x width ]
         '''
         out = self.blocks[0](x)
         embed = self.cond_encoder(cond)
@@ -181,14 +181,12 @@ class ConditionalUnet2D(nn.Module):
             pose_cond=None,
             **kwargs):
         """
-        x: (B,T,input_dim)
+        x: (B,C,H,W)
         timestep: (B,) or int, diffusion step
         local_cond: (B,T,local_cond_dim)
         global_cond: (B,global_cond_dim)
-        output: (B,T,input_dim)
+        output: (B,C,H,W)
         """
-        sample = einops.rearrange(sample, 'b h t -> b t h')
-
         # 1. time
         timesteps = timestep
         if not torch.is_tensor(timesteps):
@@ -251,6 +249,5 @@ class ConditionalUnet2D(nn.Module):
 
         x = self.final_conv(x)
 
-        x = einops.rearrange(x, 'b t h -> b h t')
         return x
 
