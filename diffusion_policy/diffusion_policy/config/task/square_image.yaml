@@ -18,10 +18,10 @@ shape_meta: &shape_meta
       shape: [2]
   action: 
     shape: [7]
-  # flow:
-  #   agentview_image:
-  #     shape: [3, 84, 84]
-  #     type: rgb
+  flow:
+    agentview_image:
+      shape: [2, 84, 84]
+      type: rgb
 
 task_name: &task_name square_d0
 dataset_type: &dataset_type mimicgen

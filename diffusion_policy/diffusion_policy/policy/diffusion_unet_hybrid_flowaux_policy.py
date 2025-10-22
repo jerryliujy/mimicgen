@@ -35,10 +35,10 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             horizon, 
             n_action_steps, 
             n_obs_steps,
+            plan_dim=256,  # the latent dim of action encoder
             num_inference_steps=None,
             obs_as_global_cond=True,
             crop_shape=(76, 76),
-            input_dim=256,
             diffusion_step_embed_dim=256,
             down_dims=(256,512,1024),
             kernel_size=5,
@@ -146,7 +146,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             global_cond_dim = obs_feature_dim * n_obs_steps
 
         model = ConditionalUnet1D(
-            input_dim=input_dim,
+            input_dim=plan_dim,
             local_cond_dim=None,
             global_cond_dim=global_cond_dim,
             diffusion_step_embed_dim=diffusion_step_embed_dim,
@@ -188,6 +188,9 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
 
         print("Diffusion params: %e" % sum(p.numel() for p in self.model.parameters()))
         print("Vision params: %e" % sum(p.numel() for p in self.obs_encoder.parameters()))
+        print("Action encoder params: %e" % sum(p.numel() for p in self.action_encoder.parameters()))
+        print("Action decoder params: %e" % sum(p.numel() for p in self.action_decoder.parameters()))
+        print("Flow decoder params: %e" % sum(p.numel() for p in self.flow_decoder.parameters()))
     
     # ========= inference  ============
     def conditional_sample(self, 
@@ -242,47 +245,34 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         B, To = value.shape[:2]
         T = self.horizon
         Da = self.action_dim
-        Do = self.obs_feature_dim
-        To = self.n_obs_steps
 
-        # build input
         device = self.device
         dtype = self.dtype
+        
+        noise_z = torch.randn(
+            size=(B, T, self.plan_dim),
+            device=device,
+            dtype=dtype,
+            generator=None  # TODO: specify a generator for reproducibility
+        )
+        
+        self.noise_scheduler.set_timesteps(self.num_inference_steps)
 
-        # handle different ways of passing observation
-        local_cond = None
-        global_cond = None
-        if self.obs_as_global_cond:
-            # condition through global feature
-            this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
-            nobs_features = self.obs_encoder(this_nobs)
-            # reshape back to B, Do
-            global_cond = nobs_features.reshape(B, -1)
-            # empty data for action
-            cond_data = torch.zeros(size=(B, T, Da), device=device, dtype=dtype)
-            cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
-        else:
-            # condition through impainting
-            this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
-            nobs_features = self.obs_encoder(this_nobs)
-            # reshape back to B, To, Do
-            nobs_features = nobs_features.reshape(B, To, -1)
-            cond_data = torch.zeros(size=(B, T, Da+Do), device=device, dtype=dtype)
-            cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
-            cond_data[:,:To,Da:] = nobs_features
-            cond_mask[:,:To,Da:] = True
+        # encode global condition
+        this_obs = dict_apply(nobs, lambda x: x[:, :self.n_obs_steps, ...].reshape(-1, *x.shape[2:]))
+        global_cond = self.obs_encoder(this_obs).reshape(B, -1)
 
-        # run sampling
-        nsample = self.conditional_sample(
-            cond_data, 
-            cond_mask,
-            local_cond=local_cond,
-            global_cond=global_cond,
-            **self.kwargs)
-        # nsample = self.action_decoder(nsample)
+        for t in self.noise_scheduler.timesteps:
+            residual = self.model(noise_z, t, global_cond=global_cond)
+            noise_z = self.noise_scheduler.step(
+                residual, t, noise_z, **self.kwargs
+            ).prev_sample
+
+        predicted_z = noise_z  # (B, T, plan_dim)
+        naction_pred = self.action_decoder(predicted_z)
         
         # unnormalize prediction
-        naction_pred = nsample[...,:Da]
+        naction_pred = naction_pred[...,:Da]
         action_pred = self.normalizer['action'].unnormalize(naction_pred)
 
         # get action
@@ -307,7 +297,6 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         nactions = self.normalizer['action'].normalize(batch['action'])
         nflow = self.normalizer['flow'].normalize(batch['flow']) if batch.get('flow', None) is not None else None
         batch_size = nactions.shape[0]
-        horizon = nactions.shape[1]
         
         # encode global condition
         this_obs = dict_apply(nobs, lambda x: x[:, :self.n_obs_steps, ...].reshape(-1, *x.shape[2:]))
@@ -337,7 +326,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         # (this is the forward diffusion process)
         noisy_z = self.noise_scheduler.add_noise(z, noise, timesteps)
         pred_noise = self.model(noisy_z, timesteps, global_cond=global_cond)
-        diffusion_loss = F.mse_loss(pred_noise, noise, reduction='none')
+        diffusion_loss = F.mse_loss(pred_noise, noise, reduction='mean')
         
         # get prediction
         if self.noise_scheduler.config.prediction_type == 'epsilon':
@@ -347,14 +336,21 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
 
         # recon loss
         recon_action = self.action_decoder(predicted_z)
-        recon_a_loss = F.mse_loss(recon_action, nactions, reduction='none')
+        recon_a_loss = F.mse_loss(recon_action, nactions, reduction='mean')
         recon_flow = self.flow_decoder(predicted_z)
-        recon_a_loss = reduce(recon_a_loss, 'b t ... -> b (...)', 'mean')
-        recon_f_loss = F.l1_loss(recon_flow, nflow, reduction='none')
-        
+        recon_f_loss = F.l1_loss(recon_flow, nflow, reduction='mean')
+
         # total loss
         total_loss = diffusion_loss + self.kl_weight * kl_loss + self.action_weight * recon_a_loss + self.flow_weight * recon_f_loss
-        return total_loss.mean()
+        
+        loss_dict = {
+            'diffusion_loss': diffusion_loss,
+            'kl_loss': kl_loss,
+            'recon_action_loss': recon_a_loss,
+            'recon_flow_loss': recon_f_loss,
+            'total_loss': total_loss
+        }
+        return loss_dict
         
 
         # # handle different ways of passing observation
