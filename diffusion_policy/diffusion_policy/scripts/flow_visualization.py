@@ -21,7 +21,8 @@ from diffusion_policy.common.flow_viz import flow_to_image
 @click.option('-d', '--demo_key', required=True, help='Demonstration key to visualize (e.g., demo_0).')
 @click.option('-v', '--view', default='agentview', help='Camera view to process.')
 @click.option('--fps', default=30, type=int, help='Frames per second for the output video.')
-def main(input, output, demo_key, view, fps):
+@click.option('--save-frames', is_flag=True, help='Save individual frames as images.')
+def main(input, output, demo_key, view, fps, save_frames):
     """
     Generates a video visualizing an image sequence and its corresponding optical flow.
     The left side of the video shows the original image, and the right side shows the flow.
@@ -66,12 +67,18 @@ def main(input, output, demo_key, view, fps):
         # Combine images side-by-side
         combined_frame = np.concatenate((original_img_bgr, flow_vis_img), axis=1)
         
+        if save_frames:
+            frame_output_path = output_path.joinpath(f"{demo_key}_frame_{i:04d}.png")
+            cv2.imwrite(str(frame_output_path), combined_frame)
+        
         # Write frame to video
         video_writer.write(combined_frame)
 
     # Release the video writer
     video_writer.release()
     print(f"Done! Video saved to {output_path}")
+    if save_frames:
+        print(f"Individual frames saved to {frame_output_path}")
 
 if __name__ == "__main__":
     main()

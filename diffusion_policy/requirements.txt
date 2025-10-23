@@ -9,20 +9,22 @@ asciitree==0.3.3
 asttokens==3.0.0
 async-timeout==5.0.1
 attrs==25.3.0
-av==10.0.0
+autodistill-grounded-sam-2 
+autodistill-yolov8
+av
 beautifulsoup4==4.13.4
 blessed==1.21.0
-Brotli @ file:///croot/brotli-split_1736182456865/work
+Brotli
 cachetools==5.5.2
-certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1746569525376/work/certifi
+certifi
 cffi==1.15.1
 chardet==5.2.0
-charset-normalizer @ file:///croot/charset-normalizer_1721748349566/work
+charset-normalizer
 click==8.1.8
-cloudpickle @ file:///home/conda/feedstock_root/build_artifacts/cloudpickle_1736947526808/work
+cloudpickle
 colorful==0.5.6
-contourpy @ file:///croot/contourpy_1738160616259/work
-cycler @ file:///tmp/build/80754af9/cycler_1637851556182/work
+contourpy
+cycler
 Cython==0.29.37
 daqp==0.7.2
 debugpy==1.8.14
@@ -42,91 +44,78 @@ evdev==1.9.2
 exceptiongroup==1.3.0
 executing==2.2.0
 fasteners==0.15
-filelock @ file:///croot/filelock_1744281381737/work
-fonttools @ file:///croot/fonttools_1737039080035/work
+filelock
+fonttools
 free-mujoco-py==2.1.6
 frozenlist==1.6.0
 fsspec==2025.5.1
-fvcore @ file:///home/conda/feedstock_root/build_artifacts/fvcore_1671623667463/work
+fvcore
 gdown==5.2.0
 gitdb==4.0.12
 GitPython==3.1.44
 glfw==1.12.0
-gmpy2 @ file:///croot/gmpy2_1738085463648/work
+gmpy2
 google-api-core==2.24.2
 google-auth==2.40.2
 googleapis-common-protos==1.70.0
 gpustat==1.1.1
 grpcio==1.71.0
-gym @ file:///home/conda/feedstock_root/build_artifacts/gym_1644328750340/work
+gym
 h5py==3.7.0
 hf-xet==1.1.10
 huggingface-hub==0.25.2
 hydra-core==1.2.0
-idna @ file:///croot/idna_1714398848350/work
+idna
 imagecodecs==2022.9.26
 imageio==2.22.0
 imageio-ffmpeg==0.4.7
 importlib_metadata==8.7.0
 importlib_resources==6.5.2
 iniconfig==2.1.0
-iopath @ file:///home/conda/feedstock_root/build_artifacts/iopath_1723846728822/work
+iopath
 ipykernel==6.16.0
 ipython==8.18.1
 jedi==0.19.2
-Jinja2 @ file:///croot/jinja2_1741710844255/work
+Jinja2
 jsonschema==4.23.0
 jsonschema-specifications==2025.4.1
 jupyter_client==8.6.3
 jupyter_core==5.7.2
-kiwisolver @ file:///croot/kiwisolver_1672387140495/work
+kiwisolver
 labmaze==1.0.6
 llvmlite==0.36.0
 loguru==0.7.3
 lxml==5.4.0
 Markdown==3.8
-MarkupSafe @ file:///croot/markupsafe_1738584038848/work
-matplotlib @ file:///home/conda/feedstock_root/build_artifacts/matplotlib-suite_1666979095169/work
+MarkupSafe
+matplotlib
 matplotlib-inline==0.1.7
 -e git+https://github.com/jerryliujy/mimicgen.git@f59fac82bc25ccfae645e22b0ae9f20fb235fac6#egg=mimicgen&subdirectory=mimicgen
 mink==0.0.13
 monotonic==1.6
-mpmath @ file:///croot/mpmath_1690848262763/work
+mpmath
 msgpack==1.1.0
 mujoco==3.3.2
 multidict==6.4.4
 nest-asyncio==1.6.0
-networkx @ file:///croot/networkx_1717597493534/work
+networkx
 numba==0.53.1
 numcodecs==0.10.2
-numpy @ file:///croot/numpy_and_numpy_base_1667233465264/work
-nvidia-cublas-cu12==12.1.3.1
-nvidia-cuda-cupti-cu12==12.1.105
-nvidia-cuda-nvrtc-cu12==12.1.105
-nvidia-cuda-runtime-cu12==12.1.105
-nvidia-cudnn-cu12==9.1.0.70
-nvidia-cufft-cu12==11.0.2.54
-nvidia-curand-cu12==10.3.2.106
-nvidia-cusolver-cu12==11.4.5.107
-nvidia-cusparse-cu12==12.1.0.106
-nvidia-ml-py==12.575.51
-nvidia-nccl-cu12==2.21.5
-nvidia-nvjitlink-cu12==12.1.105
-nvidia-nvtx-cu12==12.1.105
+numpy
 omegaconf==2.3.0
 opencensus==0.11.4
 opencensus-context==0.1.3
 opencv-python==4.6.0.66
-packaging @ file:///croot/packaging_1734472117206/work
+packaging
 pandas==2.2.3
 parameterized==0.9.0
 parso==0.8.4
 pathtools==0.1.2
 pexpect==4.9.0
-pillow @ file:///croot/pillow_1744613067434/work
+pillow
 platformdirs==4.3.8
 pluggy==1.6.0
-portalocker @ file:///croot/portalocker_1734032541946/work
+portalocker
 prometheus-client==0.13.1
 promise==2.3
 prompt_toolkit==3.0.51
@@ -140,32 +129,31 @@ py-spy==0.4.0
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pybullet-svl==3.1.6.4
-pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+pycparser
 pydantic==2.11.5
 pydantic_core==2.33.2
 pygame==2.1.2
 Pygments==2.19.1
 pynput==1.8.1
 PyOpenGL==3.1.9
-pyparsing @ file:///croot/pyparsing_1731445506121/work
+pyparsing
 PyQt6==6.7.1
-PyQt6_sip @ file:///croot/pyqt-split_1744804475988/work/pyqt_sip
-PySocks @ file:///tmp/build/80754af9/pysocks_1605305812635/work
+PyQt6_sip
+PySocks
 pytest==8.4.2
-python-dateutil @ file:///croot/python-dateutil_1716495738603/work
+python-dateutil
 python-xlib==0.33
-pytorch3d @ file:///home/conda/feedstock_root/build_artifacts/pytorch3d_1689663514561/work
 pytorchvideo==0.1.5
 pytz==2025.2
 PyWavelets==1.6.0
-PyYAML @ file:///croot/pyyaml_1728657952215/work
+PyYAML
 pyzmq==26.4.0
 qpsolvers==4.8.1
-r3m @ https://bgithub.xyz/facebookresearch/r3m/archive/b2334e726887fa0206962d7984c69c5fb09cceab.tar.gz
+r3m @ https://github.com/facebookresearch/r3m/archive/b2334e726887fa0206962d7984c69c5fb09cceab.tar.gz
 ray==2.2.0
 referencing==0.36.2
 regex==2024.11.6
-requests @ file:///croot/requests_1730999120400/work
+requests
 robomimic==0.2.0
 -e git+https://github.com/jerryliujy/mimicgen.git@f59fac82bc25ccfae645e22b0ae9f20fb235fac6#egg=robosuite&subdirectory=robosuite
 rpds-py==0.25.1
@@ -177,40 +165,37 @@ scipy==1.9.1
 sentry-sdk==2.29.1
 setproctitle==1.3.6
 shortuuid==1.0.13
-sip @ file:///croot/sip_1738856193618/work
-six @ file:///croot/six_1744271502820/work
+sip
+six
 smart-open==7.1.0
 smmap==5.0.2
 soupsieve==2.7
 stack-data==0.6.3
 sympy==1.13.1
-tabulate @ file:///croot/tabulate_1701354810597/work
+tabulate
 tensorboard==2.19.0
 tensorboard-data-server==0.7.2
 tensorboardX==2.6.2.2
-termcolor @ file:///croot/termcolor_1668084651543/work
+termcolor
 threadpoolctl==3.6.0
 tifffile==2024.8.30
 timm==1.0.20
-tomli @ file:///opt/conda/conda-bld/tomli_1657175507142/work
-torch==2.5.1+cu121
-torchaudio==2.5.1+cu121
-torchvision @ file:///workspace/croot/torchvision_1693425165028/work
-tornado @ file:///croot/tornado_1747918059467/work
+tomli
+tornado
 tqdm==4.64.1
 traitlets==5.14.3
 triton==3.1.0
 typing-inspection==0.4.1
-typing_extensions @ file:///croot/typing_extensions_1734714854207/work
+typing_extensions
 tzdata==2025.2
-unicodedata2 @ file:///croot/unicodedata2_1736541023050/work
-urllib3 @ file:///croot/urllib3_1737133630106/work
+unicodedata2
+urllib3
 virtualenv==20.31.2
 wandb==0.13.3
 wcwidth==0.2.13
 Werkzeug==3.1.3
 wrapt==1.17.2
-yacs @ file:///tmp/build/80754af9/yacs_1634047592950/work
+yacs
 yarl==1.20.0
 zarr==2.12.0
 zipp==3.21.0
