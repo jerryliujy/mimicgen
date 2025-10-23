@@ -9,6 +9,7 @@ asciitree==0.3.3
 asttokens==3.0.0
 async-timeout==5.0.1
 attrs==25.3.0
+autodistill
 autodistill-grounded-sam-2 
 autodistill-yolov8
 av
@@ -83,7 +84,6 @@ jupyter_client==8.6.3
 jupyter_core==5.7.2
 kiwisolver
 labmaze==1.0.6
-llvmlite==0.36.0
 loguru==0.7.3
 lxml==5.4.0
 Markdown==3.8
@@ -99,7 +99,7 @@ mujoco==3.3.2
 multidict==6.4.4
 nest-asyncio==1.6.0
 networkx
-numba==0.53.1
+numba
 numcodecs==0.10.2
 numpy
 omegaconf==2.3.0
@@ -154,6 +154,7 @@ ray==2.2.0
 referencing==0.36.2
 regex==2024.11.6
 requests
+roboflow
 robomimic==0.2.0
 -e git+https://github.com/jerryliujy/mimicgen.git@f59fac82bc25ccfae645e22b0ae9f20fb235fac6#egg=robosuite&subdirectory=robosuite
 rpds-py==0.25.1
@@ -167,9 +168,11 @@ setproctitle==1.3.6
 shortuuid==1.0.13
 sip
 six
+scikit-learn
 smart-open==7.1.0
 smmap==5.0.2
 soupsieve==2.7
+supervision
 stack-data==0.6.3
 sympy==1.13.1
 tabulate

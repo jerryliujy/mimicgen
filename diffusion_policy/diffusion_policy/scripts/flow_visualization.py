@@ -35,6 +35,9 @@ def main(input, output, demo_key, view, fps, save_frames):
         return
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    frame_output_path = output_path.parent.joinpath("image")
+    if save_frames:
+        frame_output_path.mkdir(parents=True, exist_ok=True)
 
     print(f"Reading data for {demo_key} from {input_path}")
     with h5py.File(input_path, 'r') as f:
@@ -68,9 +71,9 @@ def main(input, output, demo_key, view, fps, save_frames):
         combined_frame = np.concatenate((original_img_bgr, flow_vis_img), axis=1)
         
         if save_frames:
-            frame_output_path = output_path.joinpath(f"{demo_key}_frame_{i:04d}.png")
-            cv2.imwrite(str(frame_output_path), combined_frame)
-        
+            frame_output_path_each = frame_output_path.joinpath(f"{demo_key}_frame_{i:04d}.png")
+            cv2.imwrite(str(frame_output_path_each), original_img_bgr)
+
         # Write frame to video
         video_writer.write(combined_frame)
 

@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
 Script to generate and save a binary mask for a given image using GroundedSAM2.
-Usage:
-    python generate_mask.py \
-        --image path/to/image.png \
-        --ontology "robot arm" \
-        --output mask.png
 """
 import os
 import sys
@@ -17,7 +12,7 @@ from PIL import Image
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 sys.path.insert(0, project_root)
 
-from diffusion_policy.common.sam_util import generate_mask_from_image
+from diffusion_policy.common.sam_util import generate_mask_from_image_path
 
 
 def main():
@@ -31,7 +26,7 @@ def main():
         sys.exit(1)
 
     ontology = {'robot arm': 'robot arm'}  
-    mask = generate_mask_from_image(args.image, ontology)
+    mask = generate_mask_from_image_path(args.image, ontology)
 
     # convert to 0-255 image
     mask_img = (mask * 255).astype(np.uint8)

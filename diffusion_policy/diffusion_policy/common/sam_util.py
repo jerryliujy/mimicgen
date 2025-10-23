@@ -69,7 +69,7 @@ def generate_mask_from_image_path(image_path: str, ontology_dict: dict) -> np.nd
     image = cv2.imread(image_path)
     if image is None:
         raise FileNotFoundError(f"Image not found at {image_path}")
-    generate_mask_from_image(image, ontology_dict)
+    return generate_mask_from_image(image, ontology_dict)
 
 
 def visualize_mask(image, detections: sv.Detections):
