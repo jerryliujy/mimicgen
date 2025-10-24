@@ -32,7 +32,7 @@ from diffusion_policy.model.common.lr_scheduler import get_scheduler
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
-class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
+class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
     include_keys = ['global_step', 'epoch']
 
     def __init__(self, cfg: OmegaConf, output_dir=None, local_rank=-1):
@@ -203,6 +203,7 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
                             raw_loss = self.model.module.compute_loss(batch)
                         else:
                             raw_loss = self.model.compute_loss(batch)
+                        raw_loss = raw_loss['total_loss']
                         loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 

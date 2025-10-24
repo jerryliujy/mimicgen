@@ -3,10 +3,12 @@ import numpy as np
 import supervision as sv
 from autodistill.detection import CaptionOntology
 from autodistill_grounded_sam_2 import GroundedSAM2
+from autodistill.helpers import load_image
 from autodistill.utils import plot
+import os
 
 
-def generate_mask_from_image(image, ontology_dict: dict) -> np.ndarray:
+def generate_mask_from_image(image, ontology_dict: dict, target_size=224) -> np.ndarray:
     """
     Generates a binary mask for specified objects in an image array using GroundedSAM2.
 
@@ -20,17 +22,25 @@ def generate_mask_from_image(image, ontology_dict: dict) -> np.ndarray:
     """
     # Initialize the base model with the provided ontology
     base_model = GroundedSAM2(
-        ontology=CaptionOntology(ontology_dict)
+        ontology=CaptionOntology(ontology_dict),
     )
+    
+    # Resize image
+    original_shape = image.shape[:2]
+    image = cv2.resize(image, dsize=(target_size, target_size))
 
     # Perform prediction
     detections = base_model.predict(image)
+    visualize_mask(image, detections)
     
     # If no objects are detected, return an empty mask
     if len(detections.mask) == 0:
-        return np.zeros((image.shape[0], image.shape[1]), dtype=np.uint8)
+        print("No objects detected.")
+        return np.zeros(original_shape, dtype=np.uint8)
     # Combine all detected masks into a single binary mask
-    combined_mask = np.any(detections.mask, axis=0)
+    combined_mask = np.any(detections.mask, axis=0).astype(np.uint8)
+    original_size_wh = (original_shape[1], original_shape[0])
+    combined_mask = cv2.resize(combined_mask, original_size_wh, interpolation=cv2.INTER_NEAREST)
     return combined_mask.astype(np.uint8)
 
 
@@ -66,7 +76,8 @@ def generate_mask_from_image_path(image_path: str, ontology_dict: dict) -> np.nd
     Returns:
         np.ndarray: A binary mask of shape (H, W) where 1 represents detected objects.
     """
-    image = cv2.imread(image_path)
+    # image = cv2.imread(image_path)
+    image = load_image(image_path, return_format="cv2")
     if image is None:
         raise FileNotFoundError(f"Image not found at {image_path}")
     return generate_mask_from_image(image, ontology_dict)
@@ -80,7 +91,16 @@ def visualize_mask(image, detections: sv.Detections):
     annotated_image = mask_annotator.annotate(
         scene=image.copy(), detections=detections
     )
-    sv.plot_image(image=annotated_image, size=(8, 8))
+    
+    output_path = '/workspace/mimicgen/sam.png'
+    
+    if output_path:
+        # supervision visualizes in RGB, so convert back to BGR for cv2.imwrite
+        annotated_image_bgr = cv2.cvtColor(annotated_image, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(output_path, annotated_image_bgr)
+        print(f"Visualization saved to {output_path}")
+    else:
+        sv.plot_image(image=annotated_image, size=(8, 8))
 
 
 if __name__ == '__main__':

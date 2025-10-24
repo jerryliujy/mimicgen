@@ -83,7 +83,8 @@ class AsyncVectorEnv(VectorEnv):
         dummy_env_fn=None,
         observation_space=None,
         action_space=None,
-        shared_memory=True,
+        # shared_memory=True,
+        shared_memory=False,  # changed to False to avoid issues with custom spaces
         copy=True,
         context=None,
         daemon=True,

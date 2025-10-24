@@ -210,7 +210,8 @@ class RobomimicReplayImageDataset(BaseImageDataset):
         # since the rest will be discarded anyway.
         # when self.n_obs_steps is None
         # this slice does nothing (takes all)
-        T_slice = slice(self.n_obs_steps)
+        To_slice = slice(self.n_obs_steps)
+        T_slice = slice(self.horizon)
 
         obs_dict = dict()
         flow_dict = dict()
@@ -218,12 +219,12 @@ class RobomimicReplayImageDataset(BaseImageDataset):
             # move channel last to channel first
             # T,H,W,C
             # convert uint8 image to float32
-            obs_dict[key] = np.moveaxis(data[key][T_slice],-1,1
+            obs_dict[key] = np.moveaxis(data[key][To_slice],-1,1
                 ).astype(np.float32) / 255.
             # T,C,H,W
             del data[key]
         for key in self.lowdim_keys:
-            obs_dict[key] = data[key][T_slice].astype(np.float32)
+            obs_dict[key] = data[key][To_slice].astype(np.float32)
             del data[key]
         
         flow_data = None

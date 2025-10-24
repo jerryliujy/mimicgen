@@ -2,8 +2,8 @@ defaults:
   - _self_
   - task: square_image
 
-name: train_diffusion_unet_hybrid
-_target_: diffusion_policy.workspace.train_diffusion_unet_hybrid_workspace.TrainDiffusionUnetHybridWorkspace
+name: train_diffusion_unet_flowaux_hybrid
+_target_: diffusion_policy.workspace.train_diffusion_unet_flowaux_hybrid_workspace.TrainDiffusionUnetFlowauxHybridWorkspace
 
 task_name: ${task.name}
 shape_meta: ${task.shape_meta}
@@ -108,7 +108,7 @@ optimizer:
   weight_decay: 1.0e-6
 
 training:
-  device: "cpu"
+  device: "cuda"
   seed: 42
   debug: False
   resume: True
