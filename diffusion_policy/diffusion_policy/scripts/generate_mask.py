@@ -25,7 +25,7 @@ def main():
         print(f"Error: image not found: {args.image}")
         sys.exit(1)
 
-    ontology = {'apple': 'apple'}
+    ontology = {'a white robot arm with a gripper': 'robot arm'}
     mask = generate_mask_from_image_path(args.image, ontology)
 
     # convert to 0-255 image
