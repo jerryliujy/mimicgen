@@ -47,14 +47,12 @@ policy:
     start_res: 6
     upsample_channels: [128, 64, 32]
     kernel_size: 4
-
-  action_decoder:
-    _target_: diffusion_policy.model.diffusion.conv2d_components.MLP
-    channels: [128, 128, 64, '${action_dim}']
-
-  action_encoder:
-    _target_: diffusion_policy.model.diffusion.conv2d_components.MLP
-    channels: ['${action_dim}', 64, 128, 256]
+  
+  action_vae: 
+    _target_: diffusion_policy.model.action.action_vae.ActionVae
+    dim_lst: [7, 64, 128, 256]
+    horizon: ${horizon}
+    dropout: 0.4
 
   horizon: ${horizon}
   n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
@@ -73,7 +71,8 @@ policy:
   eval_fixed_crop: True
   flow_weight: 1
   action_weight: 1
-  kl_weight: 1
+
+  action_vae_path: data/pretrained/action_vae/2024.10.05-23.59.28_train_action_vae_workspace_default/best.ckpt
 
   # scheduler.step params
   # predict_epsilon: True

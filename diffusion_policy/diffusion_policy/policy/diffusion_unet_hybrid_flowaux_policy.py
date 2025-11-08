@@ -30,8 +30,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             shape_meta: dict,
             noise_scheduler: DDPMScheduler,
             flow_decoder,
-            action_decoder,
-            action_encoder,
+            action_vae,
             horizon, 
             n_action_steps, 
             n_obs_steps,
@@ -48,7 +47,6 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             eval_fixed_crop=False,
             flow_weight=0.1,
             action_weight=0.1,
-            kl_weight=0.1,
             # parameters passed to step
             **kwargs):
         super().__init__()
@@ -160,9 +158,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         self.model = model
         self.noise_scheduler = noise_scheduler
         self.flow_decoder = flow_decoder
-        self.action_decoder = action_decoder
-        self.action_encoder = action_encoder
-        # self.action_decoder = action_decoder
+        self.action_vae = action_vae
         self.mask_generator = LowdimMaskGenerator(
             action_dim=action_dim,
             obs_dim=0 if obs_as_global_cond else obs_feature_dim,
@@ -179,7 +175,6 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         self.obs_as_global_cond = obs_as_global_cond
         self.action_weight = action_weight
         self.flow_weight = flow_weight
-        self.kl_weight = kl_weight
         self.kwargs = kwargs
 
         if num_inference_steps is None:
@@ -188,8 +183,6 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
 
         print("Diffusion params: %e" % sum(p.numel() for p in self.model.parameters()))
         print("Vision params: %e" % sum(p.numel() for p in self.obs_encoder.parameters()))
-        print("Action encoder params: %e" % sum(p.numel() for p in self.action_encoder.parameters()))
-        print("Action decoder params: %e" % sum(p.numel() for p in self.action_decoder.parameters()))
         print("Flow decoder params: %e" % sum(p.numel() for p in self.flow_decoder.parameters()))
     
     # ========= inference  ============
@@ -302,18 +295,12 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         this_obs = dict_apply(nobs, lambda x: x[:, :self.n_obs_steps, ...].reshape(-1, *x.shape[2:]))
         global_cond = self.obs_encoder(this_obs).reshape(batch_size, -1)
         
-        # encode action to latent distribution
-        mu_logvar = self.action_encoder(nactions)
-        mu, logvar = torch.chunk(mu_logvar, 2, dim=-1)
-        
-        # sample a z
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        z = mu + eps * std
-        
-        # kl loss
-        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=-1).mean()
-        
+        # encode action into latent z
+        # freeze action encoder
+        with torch.no_grad():
+            z = self.action_vae.encode(nactions.reshape(batch_size * self.horizon, -1))
+        z = z.reshape(batch_size, self.horizon, -1)
+             
         # diffusion
         # =============================================================
         noise = torch.randn(z.shape, device=z.device)
@@ -335,17 +322,17 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             predicted_z = pred_noise
 
         # recon loss
-        recon_action = self.action_decoder(predicted_z)
+        with torch.no_grad():
+            recon_action = self.action_vae.decode(predicted_z)
         recon_a_loss = F.mse_loss(recon_action, nactions, reduction='mean')
         recon_flow = self.flow_decoder(predicted_z)
         recon_f_loss = F.l1_loss(recon_flow, nflow, reduction='mean')
 
         # total loss
-        total_loss = diffusion_loss + self.kl_weight * kl_loss + self.action_weight * recon_a_loss + self.flow_weight * recon_f_loss
+        total_loss = diffusion_loss + self.action_weight * recon_a_loss + self.flow_weight * recon_f_loss
         
         loss_dict = {
             'diffusion_loss': diffusion_loss,
-            'kl_loss': kl_loss,
             'recon_action_loss': recon_a_loss,
             'recon_flow_loss': recon_f_loss,
             'total_loss': total_loss

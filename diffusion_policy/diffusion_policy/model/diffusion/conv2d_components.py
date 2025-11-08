@@ -37,28 +37,6 @@ class Conv2dBlock(nn.Module):
     def forward(self, x):
         return self.block(x)
     
-class MLP(nn.Module):
-    """
-        A simple multi-layer perceptron
-        This can be used for decoding actions from a flattened feature map
-    """
-    
-    def __init__(self, channels: List[int], dropout=0.1):
-        super().__init__()
-        self.layers = []
-        for i in range(len(channels) - 1):
-            self.layers.append(
-                nn.Sequential(
-                    nn.Linear(channels[i], channels[i + 1]),
-                    nn.Mish(),
-                    nn.Dropout(dropout)
-                )
-            )
-        self.layers = nn.Sequential(*self.layers)
-    
-    def forward(self, x):
-        return self.layers(x)
-
 
 def test():
     cb = Conv2dBlock(256, 128, kernel_size=3)
