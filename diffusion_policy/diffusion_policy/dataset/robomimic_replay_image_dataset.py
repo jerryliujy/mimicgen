@@ -232,7 +232,6 @@ class RobomimicReplayImageDataset(BaseImageDataset):
         # when self.n_obs_steps is None
         # this slice does nothing (takes all)
         To_slice = slice(self.n_obs_steps)
-        T_slice = slice(self.horizon)
 
         obs_dict = dict()
         flow_dict = dict()
@@ -251,7 +250,7 @@ class RobomimicReplayImageDataset(BaseImageDataset):
         flow_data = None
         if len(self.flow_keys) > 0:
             key = self.flow_keys[0]
-            flow_data = np.moveaxis(data[f'flow_{key}'][T_slice], -1, 1).astype(np.float32)
+            flow_data = np.moveaxis(data[f'flow_{key}'][To_slice], -1, 1).astype(np.float32)
             del data[f'flow_{key}']
         
         if flow_data is not None:
@@ -293,7 +292,6 @@ def _convert_actions(raw_actions, abs_action, rotation_transformer):
 
 def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, rotation_transformer, 
         n_workers=None, max_inflight_tasks=None):
-    print('Converting Robomimic HDF5 dataset to ReplayBuffer format...')
     if n_workers is None:
         n_workers = multiprocessing.cpu_count()
     if max_inflight_tasks is None:

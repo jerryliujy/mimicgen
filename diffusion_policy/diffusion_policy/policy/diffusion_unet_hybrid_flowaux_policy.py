@@ -139,15 +139,15 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
 
         # create diffusion model
         obs_feature_dim = obs_encoder.output_shape()[0]
-        plan_dim = action_emb_dim
+        input_dim = action_emb_dim
         global_cond_dim = None
         if obs_as_global_cond:
             global_cond_dim = obs_feature_dim * n_obs_steps
         else:
-            plan_dim += obs_feature_dim * n_obs_steps
+            input_dim += obs_feature_dim
 
         model = ConditionalUnet1D(
-            input_dim=plan_dim,
+            input_dim=input_dim,
             local_cond_dim=None,
             global_cond_dim=global_cond_dim,
             diffusion_step_embed_dim=diffusion_step_embed_dim,
@@ -172,6 +172,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         self.normalizer = LinearNormalizer()
         self.horizon = horizon
         self.obs_feature_dim = obs_feature_dim
+        self.action_emb_dim = action_emb_dim
         self.n_action_steps = n_action_steps
         self.n_obs_steps = n_obs_steps
         self.obs_as_global_cond = obs_as_global_cond
@@ -233,44 +234,55 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         obs_dict: must include "obs" key
         result: must include "action" key
         """
-        assert 'past_action' not in obs_dict # not implemented yet
-        # normalize input
+        assert 'past_action' not in obs_dict 
         nobs = self.normalizer.normalize(obs_dict)
         value = next(iter(nobs.values()))
         B, To = value.shape[:2]
         T = self.horizon
-        Da = self.action_dim
+        Do = self.obs_feature_dim
+        action_emb_dim = self.action_emb_dim
 
         device = self.device
         dtype = self.dtype
-        
-        noise_z = torch.randn(
-            size=(B, T, self.plan_dim),
-            device=device,
-            dtype=dtype,
-            generator=None  # TODO: specify a generator for reproducibility
-        )
-        
-        self.noise_scheduler.set_timesteps(self.num_inference_steps)
 
-        # encode global condition
-        this_obs = dict_apply(nobs, lambda x: x[:, :self.n_obs_steps, ...].reshape(-1, *x.shape[2:]))
-        global_cond = self.obs_encoder(this_obs).reshape(B, -1)
+        global_cond = None
+        if self.obs_as_global_cond:
+            this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
+            nobs_features = self.obs_encoder(this_nobs)
+            global_cond = nobs_features.reshape(B, -1)
+            
+            noisy_z = torch.randn((B, T, action_emb_dim), device=device, dtype=dtype)
+            
+            self.noise_scheduler.set_timesteps(self.num_inference_steps)
+            for t in self.noise_scheduler.timesteps:
+                model_output = self.model(noisy_z, t, global_cond=global_cond)
+                noisy_z = self.noise_scheduler.step(model_output, t, noisy_z, **self.kwargs).prev_sample
+            predicted_z = noisy_z
+        else:
+            # condition through impainting
+            this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
+            nobs_features = self.obs_encoder(this_nobs)
+            nobs_features = nobs_features.reshape(B, To, -1)
 
-        for t in self.noise_scheduler.timesteps:
-            residual = self.model(noise_z, t, global_cond=global_cond)
-            noise_z = self.noise_scheduler.step(
-                residual, t, noise_z, **self.kwargs
-            ).prev_sample
+            cond_data = torch.zeros(size=(B, T, action_emb_dim + Do), device=device, dtype=dtype)
+            cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
+            
+            cond_data[:,:To,action_emb_dim:] = nobs_features
+            cond_mask[:,:To,action_emb_dim:] = True
 
-        predicted_z = noise_z  # (B, T, plan_dim)
-        naction_pred = self.action_decoder(predicted_z)
+            predicted_trajectory = self.conditional_sample(
+                cond_data, 
+                cond_mask,
+                global_cond=None,
+                **self.kwargs)
+            
+            predicted_z = predicted_trajectory[..., :action_emb_dim]
+
+        with torch.no_grad():
+            naction_pred = self.action_vae.decode(predicted_z)
         
-        # unnormalize prediction
-        naction_pred = naction_pred[...,:Da]
         action_pred = self.normalizer['action'].unnormalize(naction_pred)
 
-        # get action
         start = To - 1
         end = start + self.n_action_steps
         action = action_pred[:,start:end]
@@ -293,89 +305,73 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         nflow = self.normalizer['flow'].normalize(batch['flow']) if batch.get('flow', None) is not None else None
         batch_size = nactions.shape[0]
         horizon = nactions.shape[1]
+        n_obs_steps = self.n_obs_steps
         
-        # encode global condition
-        this_obs = dict_apply(nobs, lambda x: x[:, :self.n_obs_steps, ...].reshape(-1, *x.shape[2:]))
-        global_cond = self.obs_encoder(this_obs).reshape(batch_size, -1)
-        
-        # encode action into latent z
-        # freeze action encoder
+        # encode action to latent space
         with torch.no_grad():
-            z = self.action_vae.encode(nactions.reshape(batch_size * self.horizon, -1))
-        z = z.reshape(batch_size, self.horizon, -1)
+            z = self.action_vae.encode(nactions.reshape(batch_size * horizon, -1))
+        z = z.reshape(batch_size, horizon, -1)
 
-        # handle different ways of passing observation
         global_cond = None
         trajectory = z
+        cond_data = trajectory
         if self.obs_as_global_cond:
-            # reshape B, T, ... to B*T
-            this_nobs = dict_apply(nobs, 
-                lambda x: x[:,:self.n_obs_steps,...].reshape(-1,*x.shape[2:]))
+            # global cond uses film conditioning
+            this_nobs = dict_apply(nobs, lambda x: x[:,:n_obs_steps,...].reshape(-1,*x.shape[2:]))
             nobs_features = self.obs_encoder(this_nobs)
-            # reshape back to B, Do
             global_cond = nobs_features.reshape(batch_size, -1)
         else:
-            # reshape B, T, ... to B*T
+            # co-denoise action embedding and obs features
             this_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))
             nobs_features = self.obs_encoder(this_nobs)
-
-            # reshape back to B, T, Do
             nobs_features = nobs_features.reshape(batch_size, horizon, -1)
-            trajectory = torch.cat([nactions, nobs_features], dim=-1)
+            cond_data = torch.cat([z, nobs_features], dim=-1)
+            trajectory = cond_data.detach()
 
-            # generate impainting mask
-            condition_mask = self.mask_generator(trajectory.shape)
-
-        # Sample noise that we'll add to the images
+        condition_mask = self.mask_generator(trajectory.shape)
         noise = torch.randn(trajectory.shape, device=trajectory.device)
-        bsz = trajectory.shape[0]
-        # Sample a random timestep for each image
-        timesteps = torch.randint(
-            0, self.noise_scheduler.config.num_train_timesteps, 
-            (bsz,), device=trajectory.device
+        
+        timesteps = torch.randint(0, 
+            self.noise_scheduler.config.num_train_timesteps, 
+            (batch_size,), 
+            device=trajectory.device
         ).long()
-        # Add noise to the clean images according to the noise magnitude at each timestep
-        # (this is the forward diffusion process)
-        noisy_trajectory = self.noise_scheduler.add_noise(
-            trajectory, noise, timesteps)
         
-        # compute loss mask
-        loss_mask = ~condition_mask
+        noisy_trajectory = self.noise_scheduler.add_noise(trajectory, noise, timesteps)
         
-        # latent reconstruction loss
-        diffusion_loss = F.mse_loss(pred[loss_mask], noise[loss_mask], reduction='mean')
-
-        # apply conditioning
-        noisy_trajectory[condition_mask] = trajectory[condition_mask]
+        noisy_trajectory[condition_mask] = cond_data[condition_mask]
         
-        # Predict the noise residual
         pred = self.model(noisy_trajectory, timesteps, global_cond=global_cond)
 
+        loss_mask = ~condition_mask
+        diffusion_loss = F.mse_loss(pred[loss_mask], noise[loss_mask], reduction='mean')
+        
         pred_type = self.noise_scheduler.config.prediction_type 
         if pred_type == 'epsilon':
-            pred_emb = noisy_trajectory + pred
+            predicted_trajectory = trajectory + pred
         elif pred_type == 'sample':
-            pred_emb = pred
+            predicted_trajectory = pred
         else:
             raise ValueError(f"Unsupported prediction type {pred_type}")
-        
-        predicted_z = pred_emb
-        predicted_obs_feat = pred_emb
-        if not self.obs_as_global_cond:
+
+        if self.obs_as_global_cond:
+            predicted_z = predicted_trajectory
+            predicted_obs_feat = predicted_z
+        else:
             action_emb_dim = z.shape[-1]
-            predicted_z = pred_emb[..., :action_emb_dim]
-            predicted_obs_feat = pred_emb[..., action_emb_dim:]
+            predicted_z = predicted_trajectory[..., :action_emb_dim]
+            predicted_obs_feat = predicted_trajectory[..., action_emb_dim:]
             
-        # recon loss
+        # action loss
         with torch.no_grad():
             recon_action = self.action_vae.decode(predicted_z)
         recon_a_loss = F.mse_loss(recon_action, nactions, reduction='mean')
         
-        # flow loss
+        # flow loss 
         recon_flow = self.flow_decoder(predicted_obs_feat)
+        recon_flow = recon_flow[:, :n_obs_steps]
         recon_f_loss = F.l1_loss(recon_flow, nflow, reduction='mean')
         
-        # total loss
         total_loss = diffusion_loss + self.action_weight * recon_a_loss + self.flow_weight * recon_f_loss
         
         loss_dict = {
