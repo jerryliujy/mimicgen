@@ -53,7 +53,10 @@ policy:
 dataset:
   _target_: diffusion_policy.dataset.robomimic_replay_image_dataset.RobomimicReplayImageDataset
   shape_meta: ${shape_meta}
-  dataset_path: data/robomimic/datasets/square_d0/mimicgen/no_noise_flow.hdf5
+  # dataset_path: data/robomimic/datasets/square_d0/mimicgen/no_noise_flow.hdf5
+  dataset_path:
+  - "data/robomimic/datasets/square/ph/file1.hdf5"
+  - "data/robomimic/datasets/square/ph/file2.hdf5"
   horizon: ${horizon}
   pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
   pad_after: ${eval:'${n_action_steps}-1'}

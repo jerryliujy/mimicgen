@@ -77,25 +77,25 @@ class ConditionalResidualBlock1D(nn.Module):
         out = self.blocks[1](out)
         out = out + self.residual_conv(x)
         
-        if pose_cond is not None and self.pose_attn is not None:
-            pose_cond = pose_cond.reshape(pose_cond.shape[0], pose_cond.shape[1], -1)  # B x C_p x L_p
-            pose_cond = pose_cond.permute(0, 2, 1)  # B x L_p x C_p
-            if pose_cond.size(-1) != self.pose_attn.embed_dim:
-                if self.pose_proj is None:
-                    self.pose_proj = nn.Linear(
-                        pose_cond.size(-1), self.pose_attn.embed_dim).to(pose_cond.device)
-                pose_cond = self.pose_proj(pose_cond)
-            query = out.permute(0, 2, 1)  # B x L x C
-            query = nn.LayerNorm(query.shape[-1]).to(query.device)(query)
-            pose_cond_norm = nn.LayerNorm(pose_cond.shape[-1]).to(pose_cond.device)(pose_cond)
-            attn_out, _ = self.pose_attn(query, pose_cond_norm, pose_cond_norm)
-            out = out + attn_out.permute(0, 2, 1)
-        elif pose_cond is not None:
-            # process pose cond
-            pose_cond = pose_cond.reshape(pose_cond.shape[0], pose_cond.shape[1], -1)  # meet three dimensions
-            if pose_cond.size(-1) != out.size(-1):
-                pose_cond = F.adaptive_avg_pool1d(pose_cond, out.size(-1))
-            out = out + pose_cond
+        # if pose_cond is not None and self.pose_attn is not None:
+        #     pose_cond = pose_cond.reshape(pose_cond.shape[0], pose_cond.shape[1], -1)  # B x C_p x L_p
+        #     pose_cond = pose_cond.permute(0, 2, 1)  # B x L_p x C_p
+        #     if pose_cond.size(-1) != self.pose_attn.embed_dim:
+        #         if self.pose_proj is None:
+        #             self.pose_proj = nn.Linear(
+        #                 pose_cond.size(-1), self.pose_attn.embed_dim).to(pose_cond.device)
+        #         pose_cond = self.pose_proj(pose_cond)
+        #     query = out.permute(0, 2, 1)  # B x L x C
+        #     query = nn.LayerNorm(query.shape[-1]).to(query.device)(query)
+        #     pose_cond_norm = nn.LayerNorm(pose_cond.shape[-1]).to(pose_cond.device)(pose_cond)
+        #     attn_out, _ = self.pose_attn(query, pose_cond_norm, pose_cond_norm)
+        #     out = out + attn_out.permute(0, 2, 1)
+        # elif pose_cond is not None:
+        #     # process pose cond
+        #     pose_cond = pose_cond.reshape(pose_cond.shape[0], pose_cond.shape[1], -1)  # meet three dimensions
+        #     if pose_cond.size(-1) != out.size(-1):
+        #         pose_cond = F.adaptive_avg_pool1d(pose_cond, out.size(-1))
+        #     out = out + pose_cond
         return out
 
 

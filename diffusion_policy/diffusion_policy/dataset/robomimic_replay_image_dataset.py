@@ -277,6 +277,12 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
     if max_inflight_tasks is None:
         max_inflight_tasks = n_workers * 5
 
+    # In case dataset_path is a string, convert it to a list
+    if isinstance(dataset_path, str):
+        dataset_paths = [dataset_path]
+    else:
+        dataset_paths = list(dataset_path)
+
     # parse shape_meta
     rgb_keys = list()
     lowdim_keys = list()
@@ -299,138 +305,171 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
     data_group = root.require_group('data', overwrite=True)
     meta_group = root.require_group('meta', overwrite=True)
 
+    # resolve dataset paths
+    resolved_dataset_paths = list()
     try:
         original_cwd = hydra.utils.get_original_cwd()
-        dataset_path = os.path.join(original_cwd, dataset_path)
+        for path in dataset_paths:
+            resolved_dataset_paths.append(os.path.join(original_cwd, path))
     except (ValueError, ImportError):
-        pass
+        resolved_dataset_paths = dataset_paths
 
-    with h5py.File(dataset_path) as file:
-        # count total steps
-        demos = file['data']
-        episode_ends = list()
-        prev_end = 0
-        for i in range(len(demos)):
-            demo = demos[f'demo_{i}']
-            episode_length = demo['actions'].shape[0]
-            episode_end = prev_end + episode_length
-            prev_end = episode_end
-            episode_ends.append(episode_end)
-        n_steps = episode_ends[-1]
-        episode_starts = [0] + episode_ends[:-1]
-        _ = meta_group.array('episode_ends', episode_ends, 
-            dtype=np.int64, compressor=None, overwrite=True)
-
-        # save lowdim data
-        for key in tqdm(lowdim_keys + ['action'], desc="Loading lowdim data"):
-            data_key = 'obs/' + key
-            if key == 'action':
-                data_key = 'actions'
-            this_data = list()
+    episode_ends = list()
+    episode_starts = list()
+    n_steps = 0
+    
+    # First pass: iterate through all files to get metadata
+    print(f"Scanning {len(resolved_dataset_paths)} files...")
+    for path in tqdm(resolved_dataset_paths, desc="Scanning metadata"):
+        with h5py.File(path, 'r') as file:
+            # some hdf5 files might not have "data" group
+            if 'data' not in file:
+                continue
+            demos = file['data']
             for i in range(len(demos)):
-                demo = demos[f'demo_{i}']
-                this_data.append(demo[data_key][:].astype(np.float32))
-            this_data = np.concatenate(this_data, axis=0)
-            if key == 'action':
-                this_data = _convert_actions(
-                    raw_actions=this_data,
-                    abs_action=abs_action,
-                    rotation_transformer=rotation_transformer
+                demo_key = f'demo_{i}'
+                if demo_key not in demos:
+                    continue
+                demo = demos[demo_key]
+                episode_length = demo['actions'].shape[0]
+                episode_end = n_steps + episode_length
+                episode_starts.append(n_steps)
+                episode_ends.append(episode_end)
+                n_steps = episode_end
+
+    _ = meta_group.array('episode_ends', episode_ends, 
+        dtype=np.int64, compressor=None, overwrite=True)
+
+    # save lowdim data
+    for key in tqdm(lowdim_keys + ['action'], desc="Loading lowdim data"):
+        data_key = 'obs/' + key
+        if key == 'action':
+            data_key = 'actions'
+        
+        # pre-allocate array
+        if key == 'action':
+            shape = tuple(shape_meta['action']['shape'])
+        else:
+            shape = tuple(shape_meta['obs'][key]['shape'])
+        this_data_arr = data_group.empty(
+            name=key,
+            shape=(n_steps,) + shape,
+            chunks=(n_steps,) + shape, # single chunk for faster access
+            compressor=None,
+            dtype=np.float32
+        )
+
+        # load data from all files
+        demo_idx_offset = 0
+        for path in tqdm(resolved_dataset_paths, desc=f"Loading {key}", leave=False):
+            with h5py.File(path, 'r') as file:
+                if 'data' not in file:
+                    continue
+                demos = file['data']
+                for i in range(len(demos)):
+                    demo_key = f'demo_{i}'
+                    if demo_key not in demos:
+                        continue
+                    demo = demos[demo_key]
+                    data_chunk = demo[data_key][:].astype(np.float32)
+                    
+                    # find where this demo should go
+                    global_demo_idx = demo_idx_offset + i
+                    start_idx = episode_starts[global_demo_idx]
+                    end_idx = episode_ends[global_demo_idx]
+
+                    if key == 'action':
+                        data_chunk = _convert_actions(
+                            raw_actions=data_chunk,
+                            abs_action=abs_action,
+                            rotation_transformer=rotation_transformer
+                        )
+                    this_data_arr[start_idx:end_idx] = data_chunk
+                demo_idx_offset += len(demos)
+        
+        # verify shape
+        if key == 'action':
+            assert this_data_arr.shape == (n_steps,) + tuple(shape_meta['action']['shape'])
+        else:
+            assert this_data_arr.shape == (n_steps,) + tuple(shape_meta['obs'][key]['shape'])
+
+    def img_copy(zarr_arr, zarr_idx, dataset_path, hdf5_key, hdf5_idx):
+        try:
+            # Each thread opens its own file handle.
+            with h5py.File(dataset_path, 'r') as file:
+                hdf5_arr = file[hdf5_key]
+                zarr_arr[zarr_idx] = hdf5_arr[hdf5_idx]
+                # make sure we can successfully decode
+                _ = zarr_arr[zarr_idx]
+            return True
+        except Exception as e:
+            print(e)
+            return False
+    
+    with tqdm(total=n_steps*(len(rgb_keys) + len(flow_keys)), desc="Loading image data", mininterval=1.0) as pbar:
+        # one chunk per thread, therefore no synchronization needed
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futures = set()
+            
+            # Common logic for rgb and flow keys
+            key_map = {key: 'obs' for key in rgb_keys}
+            key_map.update({f'flow_{key}': 'flow' for key in flow_keys})
+            
+            for zarr_key, data_type in key_map.items():
+                if data_type == 'obs':
+                    shape = tuple(shape_meta['obs'][zarr_key]['shape'])
+                    hdf5_obs_key = zarr_key
+                else: # flow
+                    flow_key_name = zarr_key.replace('flow_', '')
+                    shape = tuple(shape_meta['flow'][flow_key_name]['shape'])
+                    hdf5_obs_key = flow_key_name
+
+                c,h,w = shape
+                this_compressor = Jpeg2k(level=50)
+                img_arr = data_group.require_dataset(
+                    name=zarr_key,
+                    shape=(n_steps,h,w,c),
+                    chunks=(1,h,w,c),
+                    compressor=this_compressor,
+                    dtype=np.uint8
                 )
-                assert this_data.shape == (n_steps,) + tuple(shape_meta['action']['shape'])
-            else:
-                assert this_data.shape == (n_steps,) + tuple(shape_meta['obs'][key]['shape'])
-            _ = data_group.array(
-                name=key,
-                data=this_data,
-                shape=this_data.shape,
-                chunks=this_data.shape,
-                compressor=None,
-                dtype=this_data.dtype
-            )
-        
-        def img_copy(zarr_arr, zarr_idx, dataset_path, hdf5_key, hdf5_idx):
-            try:
-                # Each thread opens its own file handle.
-                with h5py.File(dataset_path, 'r') as file:
-                    hdf5_arr = file[hdf5_key]
-                    zarr_arr[zarr_idx] = hdf5_arr[hdf5_idx]
-                    # make sure we can successfully decode
-                    _ = zarr_arr[zarr_idx]
-                return True
-            except Exception as e:
-                print(e)
-                return False
-        
-        with tqdm(total=n_steps*(len(rgb_keys) + len(flow_keys)), desc="Loading image data", mininterval=1.0) as pbar:
-            # one chunk per thread, therefore no synchronization needed
-            with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-                futures = set()
-                for key in rgb_keys:
-                    data_key = 'obs/' + key
-                    shape = tuple(shape_meta['obs'][key]['shape'])
-                    c,h,w = shape
-                    this_compressor = Jpeg2k(level=50)
-                    img_arr = data_group.require_dataset(
-                        name=key,
-                        shape=(n_steps,h,w,c),
-                        chunks=(1,h,w,c),
-                        compressor=this_compressor,
-                        dtype=np.uint8
-                    )
-                    for episode_idx in range(len(demos)):
-                        hdf5_key = f"data/demo_{episode_idx}/obs/{key}"
-                        demo_len = demos[f'demo_{episode_idx}']['obs'][key].shape[0]
-                        for hdf5_idx in range(demo_len):
-                            if len(futures) >= max_inflight_tasks:
-                                # limit number of inflight tasks
-                                completed, futures = concurrent.futures.wait(futures, 
-                                    return_when=concurrent.futures.FIRST_COMPLETED)
-                                for f in completed:
-                                    if not f.result():
-                                        raise RuntimeError('Failed to encode image!')
-                                pbar.update(len(completed))
 
-                            zarr_idx = episode_starts[episode_idx] + hdf5_idx
-                            futures.add(
-                                executor.submit(img_copy, 
-                                    img_arr, zarr_idx, dataset_path, hdf5_key, hdf5_idx))
-                            
-                for key in flow_keys:
-                    shape = tuple(shape_meta['flow'][key]['shape'])
-                    c,h,w = shape
-                    this_compressor = Jpeg2k(level=50)
-                    flow_arr = data_group.require_dataset(
-                        name=f'flow_{key}',
-                        shape=(n_steps,h,w,c),
-                        chunks=(1,h,w,c),
-                        compressor=this_compressor,
-                        dtype=np.uint8
-                    )
-                    for episode_idx in range(len(demos)):
-                        # Correctly access flow data
-                        hdf5_key = f"data/demo_{episode_idx}/flow/{key}"
-                        demo_len = demos[f'demo_{episode_idx}']['flow'][key].shape[0]
-                        for hdf5_idx in range(demo_len):
-                            if len(futures) >= max_inflight_tasks:
-                                # limit number of inflight tasks
-                                completed, futures = concurrent.futures.wait(futures, 
-                                    return_when=concurrent.futures.FIRST_COMPLETED)
-                                for f in completed:
-                                    if not f.result():
-                                        raise RuntimeError('Failed to encode flow data!')
-                                pbar.update(len(completed))
+                demo_idx_offset = 0
+                for path in resolved_dataset_paths:
+                    with h5py.File(path, 'r') as file:
+                        if 'data' not in file:
+                            continue
+                        demos = file['data']
+                        for i in range(len(demos)):
+                            demo_key = f'demo_{i}'
+                            if demo_key not in demos:
+                                continue
+                            global_demo_idx = demo_idx_offset + i
+                            hdf5_key = f"data/{demo_key}/{data_type}/{hdf5_obs_key}"
+                            if hdf5_key not in file:
+                                continue
+                            demo_len = file[hdf5_key].shape[0]
+                            for hdf5_idx in range(demo_len):
+                                if len(futures) >= max_inflight_tasks:
+                                    # limit number of inflight tasks
+                                    completed, futures = concurrent.futures.wait(futures, 
+                                        return_when=concurrent.futures.FIRST_COMPLETED)
+                                    for f in completed:
+                                        if not f.result():
+                                            raise RuntimeError(f'Failed to encode {data_type} data!')
+                                    pbar.update(len(completed))
 
-                            zarr_idx = episode_starts[episode_idx] + hdf5_idx
-                            futures.add(
-                                executor.submit(img_copy, 
-                                    flow_arr, zarr_idx, dataset_path, hdf5_key, hdf5_idx))
+                                zarr_idx = episode_starts[global_demo_idx] + hdf5_idx
+                                futures.add(
+                                    executor.submit(img_copy, 
+                                        img_arr, zarr_idx, path, hdf5_key, hdf5_idx))
+                        demo_idx_offset += len(demos)
 
-                completed, futures = concurrent.futures.wait(futures)
-                for f in completed:
-                    if not f.result():
-                        raise RuntimeError('Failed to encode image!')
-                pbar.update(len(completed))
+            completed, futures = concurrent.futures.wait(futures)
+            for f in completed:
+                if not f.result():
+                    raise RuntimeError('Failed to encode image/flow data!')
+            pbar.update(len(completed))
 
     replay_buffer = ReplayBuffer(root)
     return replay_buffer
