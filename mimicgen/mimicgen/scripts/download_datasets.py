@@ -5,7 +5,14 @@
 """
 Script to download datasets packaged with the repository.
 """
-import os
+if __name__ == "__main__":
+    import sys
+    import os
+    import pathlib
+
+    ROOT_DIR = str(pathlib.Path(__file__).parent.parent.parent)
+    sys.path.append(ROOT_DIR)
+
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com/"
 import argparse
 
