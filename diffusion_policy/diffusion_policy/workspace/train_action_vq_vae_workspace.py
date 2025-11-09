@@ -21,7 +21,7 @@ import tqdm
 import numpy as np
 import shutil
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
-from diffusion_policy.diffusion_policy.model.action.action_vq_vae import ActionVqVae
+from diffusion_policy.model.action.action_vq_vae import ActionVqVae
 from diffusion_policy.dataset.base_dataset import BaseImageDataset
 from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
 from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
@@ -128,13 +128,14 @@ class TrainActionVqVaeWorkspace(BaseWorkspace):
 
         # device transfer
         device = torch.device(cfg.training.device)
+        self.normalizer.to(device)
         if self.local_rank != -1:
             self.model.to(device)
             self.model = DDP(self.model, device_ids=[self.local_rank])
         else:
             self.model.to(device)
         optimizer_to(self.optimizer, device)
-
+        
         # save batch for sampling
         train_sampling_batch = None
 
@@ -158,12 +159,10 @@ class TrainActionVqVaeWorkspace(BaseWorkspace):
                         leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                     for batch_idx, batch in enumerate(tepoch):
                         # we only want action data
-                        batch = batch['action']
-                        # device transfer
-                        batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
+                        batch = batch['action'].to(device)
                         if train_sampling_batch is None:
                             train_sampling_batch = batch
-                        batch = self.normalizer.normalize(batch)
+                        batch = self.normalizer['action'].normalize(batch)
 
                         # compute loss
                         if self.local_rank != -1:
@@ -176,11 +175,11 @@ class TrainActionVqVaeWorkspace(BaseWorkspace):
                         self.optimizer.step()
                         
                         # logging
-                        raw_loss_cpu = raw_loss.item()
-                        tepoch.set_postfix(loss=raw_loss_cpu, refresh=False)
-                        train_losses.append(raw_loss_cpu)
+                        loss_cpu = loss.item()
+                        tepoch.set_postfix(loss=loss_cpu, refresh=False)
+                        train_losses.append(loss_cpu)
                         step_log = {
-                            'train_loss': raw_loss_cpu,
+                            'train_loss': loss_cpu,
                             'global_step': self.global_step,
                             'epoch': self.epoch,
                         }

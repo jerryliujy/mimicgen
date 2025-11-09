@@ -32,6 +32,27 @@ from diffusion_policy.common.normalize_util import (
 )
 register_codecs()
 
+
+def get_cache_path_from_dataset_path(dataset_path):
+    # In case dataset_path is a string, convert it to a list
+    if isinstance(dataset_path, str):
+        dataset_paths = [dataset_path]
+    else:
+        dataset_paths = list(dataset_path)
+    
+    # Sort the paths to ensure consistent hash regardless of order
+    dataset_paths.sort()
+    
+    # Create a hash of the sorted list of paths
+    path_str = json.dumps(dataset_paths)
+    path_hash = hashlib.md5(path_str.encode('utf-8')).hexdigest()
+    
+    # Use the directory of the first path to store the cache
+    cache_dir = os.path.dirname(dataset_paths[0])
+    cache_path = os.path.join(cache_dir, f"cache_{path_hash}.zarr.zip")
+    return cache_path
+
+
 class RobomimicReplayImageDataset(BaseImageDataset):
     def __init__(self,
             shape_meta: dict,
@@ -52,7 +73,7 @@ class RobomimicReplayImageDataset(BaseImageDataset):
 
         replay_buffer = None
         if use_cache:
-            cache_zarr_path = dataset_path + '.zarr.zip'
+            cache_zarr_path = get_cache_path_from_dataset_path(dataset_path)
             cache_lock_path = cache_zarr_path + '.lock'
             print('Acquiring lock on cache.')
             with FileLock(cache_lock_path):
@@ -272,6 +293,7 @@ def _convert_actions(raw_actions, abs_action, rotation_transformer):
 
 def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, rotation_transformer, 
         n_workers=None, max_inflight_tasks=None):
+    print('Converting Robomimic HDF5 dataset to ReplayBuffer format...')
     if n_workers is None:
         n_workers = multiprocessing.cpu_count()
     if max_inflight_tasks is None:

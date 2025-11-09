@@ -14,6 +14,7 @@ from diffusion_policy.model.common.residual_vq import ResidualVQ
 from diffusion_policy.model.diffusion.conv1d_components import (
     Conv1dBlock, Downsample1d, Upsample1d
 )
+from diffusion_policy.model.common.module_attr_mixin import ModuleAttrMixin
 
 
 def weights_init_encoder(m):
@@ -27,19 +28,6 @@ def weights_init_encoder(m):
         mid = m.weight.size(2) // 2
         gain = nn.init.calculate_gain("relu")
         nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
-        
-
-def get_tensor(z, device):
-    if z is None:
-        return None
-    if z[0].dtype == np.dtype("O"):
-        return None
-    if len(z.shape) == 1:
-        return torch.FloatTensor(z.copy()).to(device).unsqueeze(0)
-        # return torch.from_numpy(z.copy()).float().to(device).unsqueeze(0)
-    else:
-        return torch.FloatTensor(z.copy()).to(device)
-        # return torch.from_numpy(z.copy()).float().to(device)
 
 
 class EncoderMLP(nn.Module):
@@ -118,7 +106,7 @@ class DecoderConv1D(nn.Module):
         return x
 
 
-class ActionVqVae:
+class ActionVqVae(ModuleAttrMixin):
     def __init__(
         self,
         input_dim_h=16,  # length of action chunk
@@ -129,9 +117,9 @@ class ActionVqVae:
         vqvae_groups=4,
         encoder_loss_multiplier=1.0,
         act_scale=1.0,
-        use_mlp=True,
-        device='cuda'
+        use_mlp=True
     ):
+        super(ActionVqVae, self).__init__()
         self.n_latent_dims = n_latent_dims
         self.input_dim_h = input_dim_h
         self.input_dim_w = input_dim_w
@@ -140,7 +128,6 @@ class ActionVqVae:
         self.encoder_loss_multiplier = encoder_loss_multiplier
         self.act_scale = act_scale
         self.use_mlp = use_mlp
-        self.device = device
 
         discrete_cfg = {"groups": self.vqvae_groups, "n_embed": self.vqvae_n_embed}
 
@@ -148,29 +135,30 @@ class ActionVqVae:
             dim=self.n_latent_dims,
             num_quantizers=discrete_cfg["groups"],
             codebook_size=self.vqvae_n_embed,
-        ).to(self.device)
+        )
         self.embedding_dim = self.n_latent_dims
 
         if use_mlp:
+            input_dim_w = input_dim_h * input_dim_w
             self.encoder = EncoderMLP(
                 input_dim=input_dim_w, output_dim=n_latent_dims, 
                 down_dims=down_dims
-            ).to(self.device)
+            )
             self.decoder = EncoderMLP(
                 input_dim=n_latent_dims, output_dim=input_dim_w, 
                 down_dims=list(reversed(down_dims))
-            ).to(self.device)
+            )
         else:
             self.encoder = Encoder1DCNN(
                 input_dim=input_dim_w,
                 output_dim=n_latent_dims,
                 down_dims=down_dims
-            ).to(self.device)
+            )
             self.decoder = Encoder1DCNN(
                 input_dim=n_latent_dims,
                 output_dim=input_dim_w,
                 down_dims=list(reversed(down_dims))
-            ).to(self.device)
+            )
             
 
     def get_action_from_latent(self, latent):
@@ -187,14 +175,11 @@ class ActionVqVae:
 
 
     def preprocess(self, state):
-        if not torch.is_tensor(state):
-            state = get_tensor(state, self.device)
-        
         if self.use_mlp:
             state = einops.rearrange(state, "N T A -> N (T A)")
         else:
             state = state.permute(0, 2, 1)  # (N, A, T)
-        return state.to(self.device)
+        return state
     
     
     def encode(self, state):
@@ -244,16 +229,13 @@ class ActionVqVae:
     
     def compute_loss(self, state):
         # state: (B, T, A)
-        recon_state, vq_loss_dict = self.forward(state)
-        
-        # vq_loss is a dict of {'loss', 'commitment_loss'}
-        vq_loss = vq_loss_dict['loss']
-        recon_loss = F.mse_loss(state, recon_state)
-        
-        total_loss = recon_loss + vq_loss
+        dec_out, vq_loss = self.forward(state)
+
+        recon_loss = (state - dec_out).abs().mean()
+        total_loss = recon_loss * self.encoder_loss_multiplier + vq_loss.sum() * 5.0
         
         return {
             'total_loss': total_loss,
-            'recon_loss': recon_loss.detach().item(),
-            'vq_loss': vq_loss.detach().item()
+            'recon_loss': recon_loss.detach(),
+            'vq_loss': vq_loss.sum().detach()
         }

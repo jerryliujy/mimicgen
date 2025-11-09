@@ -25,7 +25,10 @@ shape_meta: &shape_meta
 
 task_name: &task_name coffee_d0
 dataset_type: &dataset_type mimicgen
-dataset_path: &dataset_path data/robomimic/datasets/${task.task_name}/${task.dataset_type}/no_noise_test.hdf5
+dataset_path: &dataset_path
+- "data/core/coffee_d0.hdf5"
+- "data/core/coffee_d1.hdf5"
+- "data/core/coffee_d2.hdf5"
 abs_action: &abs_action False
 
 env_runner:
