@@ -9,9 +9,6 @@ asciitree==0.3.3
 asttokens==3.0.0
 async-timeout==5.0.1
 attrs==25.3.0
-autodistill
-autodistill-grounded-sam-2 
-autodistill-yolov8
 av
 beautifulsoup4==4.13.4
 blessed==1.21.0
