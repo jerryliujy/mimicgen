@@ -212,11 +212,13 @@ class TrainActionVqVaeWorkspace(BaseWorkspace):
                         with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}", 
                                 leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                             for batch_idx, batch in enumerate(tepoch):
-                                batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
+                                batch = batch['action'].to(device)
+                                batch = self.normalizer['action'].normalize(batch)
                                 if self.local_rank != -1:
                                     loss = self.model.module.compute_loss(batch)
                                 else:
                                     loss = self.model.compute_loss(batch)
+                                loss = loss['total_loss'].item()
                                 val_losses.append(loss)
                                 if (cfg.training.max_val_steps is not None) \
                                     and batch_idx >= (cfg.training.max_val_steps-1):

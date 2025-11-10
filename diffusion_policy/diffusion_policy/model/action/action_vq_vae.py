@@ -35,7 +35,8 @@ class EncoderMLP(nn.Module):
         self,
         input_dim,
         output_dim,
-        down_dims
+        down_dims,
+        dropout=0.4
     ):
         super(EncoderMLP, self).__init__()
         layers = []
@@ -45,6 +46,7 @@ class EncoderMLP(nn.Module):
         for i in range(1, len(down_dims)):
             layers.append(nn.Linear(down_dims[i-1], down_dims[i]))
             layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
 
         self.encoder = nn.Sequential(*layers)
         self.fc = nn.Linear(down_dims[-1], output_dim)
@@ -62,7 +64,8 @@ class Encoder1DCNN(nn.Module):
         input_dim,
         output_dim,
         down_dims,
-        kernel_size=3
+        kernel_size=3,
+        dropout=0.2
     ):
         super(Encoder1DCNN, self).__init__()
         blocks = list()
@@ -70,6 +73,7 @@ class Encoder1DCNN(nn.Module):
         for i, dim in enumerate(down_dims):
             blocks.append(Conv1dBlock(current_dim, dim, kernel_size=kernel_size))
             blocks.append(Downsample1d(dim))
+            blocks.append(nn.Dropout(dropout))
             current_dim = dim
         self.encoder = nn.Sequential(*blocks)
         self.fc = nn.Linear(current_dim, output_dim)
@@ -86,7 +90,8 @@ class DecoderConv1D(nn.Module):
                  input_dim, 
                  output_dim, 
                  up_dims, 
-                 kernel_size=3
+                 kernel_size=3,
+                 dropout=0.2
         ):
         super().__init__()
         blocks = list()
@@ -94,6 +99,7 @@ class DecoderConv1D(nn.Module):
         for i, dim in enumerate(up_dims):
             blocks.append(Conv1dBlock(current_dim, dim, kernel_size=kernel_size))
             blocks.append(Upsample1d(dim))
+            blocks.append(nn.Dropout(dropout))
             current_dim = dim
         self.decoder = nn.Sequential(*blocks)
         self.fc = nn.Conv1d(current_dim, output_dim, kernel_size=3, padding=1)
@@ -117,7 +123,8 @@ class ActionVqVae(ModuleAttrMixin):
         vqvae_groups=4,
         encoder_loss_multiplier=1.0,
         act_scale=1.0,
-        use_mlp=True
+        use_mlp=True,
+        dropout=0.2
     ):
         super(ActionVqVae, self).__init__()
         self.n_latent_dims = n_latent_dims
@@ -142,22 +149,26 @@ class ActionVqVae(ModuleAttrMixin):
             input_dim_w = input_dim_h * input_dim_w
             self.encoder = EncoderMLP(
                 input_dim=input_dim_w, output_dim=n_latent_dims, 
-                down_dims=down_dims
+                down_dims=down_dims,
+                dropout=dropout
             )
             self.decoder = EncoderMLP(
                 input_dim=n_latent_dims, output_dim=input_dim_w, 
-                down_dims=list(reversed(down_dims))
+                down_dims=list(reversed(down_dims)),
+                dropout=dropout
             )
         else:
             self.encoder = Encoder1DCNN(
                 input_dim=input_dim_w,
                 output_dim=n_latent_dims,
-                down_dims=down_dims
+                down_dims=down_dims,
+                dropout=dropout
             )
             self.decoder = Encoder1DCNN(
                 input_dim=n_latent_dims,
                 output_dim=input_dim_w,
-                down_dims=list(reversed(down_dims))
+                down_dims=list(reversed(down_dims)),
+                dropout=dropout
             )
             
 

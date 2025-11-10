@@ -19,25 +19,25 @@ device: 'cuda'
 
 policy:
   _target_: diffusion_policy.model.action.action_vq_vae.ActionVqVae
-  input_dim_h: 16  # length of action chunk
+  input_dim_h: ${horizon}  # length of action chunk
   input_dim_w: 7  # action dim
-  down_dims: [128, 256]
+  down_dims: [128]
   n_latent_dims: 512
-  vqvae_n_embed: 32
-  vqvae_groups: 4
+  vqvae_n_embed: 16
+  vqvae_groups: 2
   encoder_loss_multiplier: 1.0
   act_scale: 1.0
   use_mlp: true
 
 dataloader:
-  batch_size: 64
+  batch_size: 2048
   num_workers: 8
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 64
+  batch_size: 2048
   num_workers: 8
   shuffle: False
   pin_memory: True
@@ -45,21 +45,21 @@ val_dataloader:
 
 optimizer:
   _target_: torch.optim.Adam
-  lr: 1.0e-3
-  betas: [0.95, 0.999]
+  lr: 1e-3
+  betas: [0.9, 0.999]
   eps: 1.0e-8
-  weight_decay: 1.0e-6
+  weight_decay: 1e-4
 
 training:
   device: ${device}
   seed: 42
   debug: False
   resume: True
-  num_epochs: 1002
+  num_epochs: 301
   # training loop control
   # in epochs
-  checkpoint_every: 1000
-  val_every: 1000
+  checkpoint_every: 300
+  val_every: 50
   # steps per epoch
   max_train_steps: null
   max_val_steps: null
@@ -78,7 +78,7 @@ logging:
 
 checkpoint:
   save_ckpt: True
-  save_specific_steps: [500, 750]  
+  save_specific_steps: [150, 225]  
   topk:
     monitor_key: test_mean_score
     mode: max
