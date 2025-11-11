@@ -101,11 +101,6 @@ class RobomimicReplayActionDataset(Dataset):
         print(f"Loaded {self.actions_in_memory.shape[0]} total action steps.")
 
         # ========= 2. Create a sampler =========
-        # Create a dummy replay buffer to reuse the SequenceSampler logic
-        replay_buffer = {
-            'episode_ends': np.array(episode_ends)
-        }
-
         val_mask = get_val_mask(
             n_episodes=len(episode_ends), 
             val_ratio=val_ratio,
@@ -134,8 +129,8 @@ class RobomimicReplayActionDataset(Dataset):
         episode_idx, local_idx = self.sampler.idx_to_local_idx(idx)
         
         # Calculate start and end index in the flat actions_in_memory tensor
-        start_idx = self.sampler.replay_buffer['episode_starts'][episode_idx] + local_idx
-        end_idx = start_idx + self.sequence_length
+        start_idx = self.sampler.episode_starts[episode_idx] + local_idx
+        end_idx = start_idx + self.horizon
         
         # Slice directly from the in-memory tensor
         action_sequence = self.actions_in_memory[start_idx:end_idx]
