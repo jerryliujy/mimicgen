@@ -151,3 +151,61 @@ class SequenceSampler:
                 data[sample_start_idx:sample_end_idx] = sample
             result[key] = data
         return result
+
+class ActionSequenceSampler:
+    def __init__(self, 
+            episode_ends: np.ndarray,
+            sequence_length: int,
+            pad_before: int=0,
+            pad_after: int=0,
+            episode_mask: np.ndarray=None):
+        
+        super().__init__()
+        assert(pad_before >= 0)
+        assert(pad_after >= 0)
+
+        self.sequence_length = sequence_length
+        self.pad_before = pad_before
+        self.pad_after = pad_after
+        self.episode_ends = episode_ends
+
+        self.n_episodes = len(episode_ends)
+        
+        episode_starts = np.zeros_like(episode_ends)
+        episode_starts[1:] = episode_ends[:-1]
+        self.episode_starts = episode_starts
+
+        self.episode_indices = np.arange(self.n_episodes)
+        if episode_mask is not None:
+            self.episode_indices = self.episode_indices[episode_mask]
+        
+        episode_lengths = episode_ends[self.episode_indices] - episode_starts[self.episode_indices]
+        
+        # Calculate sample weights for each episode
+        self.sample_weights = episode_lengths - (sequence_length - 1)
+        self.sample_weights[self.sample_weights < 0] = 0 # Episodes shorter than sequence_length have 0 weight
+
+        self.cumsum = np.cumsum(self.sample_weights)
+
+    def __len__(self):
+        if len(self.cumsum) == 0:
+            return 0
+        return self.cumsum[-1]
+
+    def idx_to_local_idx(self, idx):
+        """
+        Converts a global sample index to an episode index and a local start index within that episode.
+        """
+        # Find which episode the index falls into
+        episode_idx_in_masked_set = np.searchsorted(self.cumsum, idx, side='right')
+        
+        # Get the actual episode index
+        episode_idx = self.episode_indices[episode_idx_in_masked_set]
+        
+        # Find the local index within that episode
+        if episode_idx_in_masked_set > 0:
+            local_idx = idx - self.cumsum[episode_idx_in_masked_set - 1]
+        else:
+            local_idx = idx
+            
+        return episode_idx, local_idx
