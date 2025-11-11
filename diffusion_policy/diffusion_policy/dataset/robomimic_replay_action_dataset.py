@@ -91,7 +91,7 @@ class RobomimicReplayActionDataset(Dataset):
                     
                     actions_chunk = demos[demo_key]['actions'][:]
                     converted_actions = _convert_actions(actions_chunk, abs_action, rotation_transformer)
-                    all_actions.append(torch.from_numpy(converted_actions))
+                    all_actions.append(torch.from_numpy(converted_actions).float())
                     
                     episode_length = len(actions_chunk)
                     episode_ends.append(n_steps + episode_length)
