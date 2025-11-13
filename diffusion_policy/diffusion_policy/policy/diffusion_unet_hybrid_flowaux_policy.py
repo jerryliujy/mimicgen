@@ -30,7 +30,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             shape_meta: dict,
             noise_scheduler: DDPMScheduler,
             flow_decoder,
-            action_vae,
+            action_vq_vae,
             horizon, 
             n_action_steps, 
             n_obs_steps,
@@ -161,7 +161,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         self.model = model
         self.noise_scheduler = noise_scheduler
         self.flow_decoder = flow_decoder
-        self.action_vae = action_vae
+        self.action_vq_vae = action_vq_vae
         self.mask_generator = LowdimMaskGenerator(
             action_dim=action_emb_dim,
             obs_dim=0 if obs_as_global_cond else obs_feature_dim,
@@ -279,7 +279,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             predicted_z = predicted_trajectory[..., :action_emb_dim]
 
         with torch.no_grad():
-            naction_pred = self.action_vae.decode(predicted_z)
+            naction_pred = self.action_vq_vae.decode(predicted_z)
         
         action_pred = self.normalizer['action'].unnormalize(naction_pred)
 
@@ -309,7 +309,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         
         # encode action to latent space
         with torch.no_grad():
-            z = self.action_vae.encode(nactions.reshape(batch_size * horizon, -1))
+            z = self.action_vq_vae.encode(nactions.reshape(batch_size * horizon, -1))
         z = z.reshape(batch_size, horizon, -1)
 
         global_cond = None
@@ -364,7 +364,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             
         # action loss
         with torch.no_grad():
-            recon_action = self.action_vae.decode(predicted_z)
+            recon_action = self.action_vq_vae.decode(predicted_z)
         recon_a_loss = F.mse_loss(recon_action, nactions, reduction='mean')
         
         # flow loss 
