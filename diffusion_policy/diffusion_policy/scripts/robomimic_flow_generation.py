@@ -15,6 +15,7 @@ import h5py
 from tqdm import tqdm
 import collections
 import pickle
+import traceback
 from diffusion_policy.common.flow_util import get_flow_predictor, generate_flow_from_frames
 
 
@@ -26,14 +27,25 @@ def worker(args):
 
         with h5py.File(input_path, 'r') as f:
             obs_arr = f[f'data/{demo_key}/obs/{view}'][:]
+            
+        if obs_arr.shape[0] <= interval:
+            return (demo_key, False, "Not enough frames.")
 
-        flow_arr = generate_flow_from_frames(obs_arr, flow_predictor, interval=interval, target_size=target_size)
+        flow_arr = generate_flow_from_frames(
+            obs_arr, 
+            flow_predictor, 
+            interval=interval, 
+            target_size=target_size,
+            progress_desc=f"Flow for {demo_key}"
+        )
 
         # Return the result instead of writing to file
         return (demo_key, True, flow_arr)
     except Exception as e:
         # Return the error message
-        return (demo_key, False, str(e))
+        error_trace = traceback.format_exc()
+        return (demo_key, False, error_trace)
+        # return (demo_key, False, str(e))
     
 
 @click.command()
@@ -56,12 +68,23 @@ def main(input, view, interval, num_workers, target_size):
         
     with h5py.File(input_path, 'r') as f:
         demo_keys = sorted(list(f['data'].keys()))
-        
-    # run
-    with mp.Pool(num_workers) as pool:
-        # Note: output_path is removed from worker arguments
-        results = list(tqdm(pool.map(worker, [(input_path, key, view, interval, target_size) for key in demo_keys])))
+
+    print(f"Processing {len(demo_keys)} demos with {num_workers} workers...")
     
+    # run
+    tasks = [(input_path, key, view, interval, target_size) for key in demo_keys]
+    results = list()
+    # Use imap_unordered for a live progress bar, as map blocks until all results are ready.
+    with mp.Pool(num_workers) as pool:
+        with tqdm(total=len(tasks), desc="Processing Demos") as pbar:
+            for result in pool.imap_unordered(worker, tasks):
+                results.append(result)
+                pbar.update()
+                
+    # Sort results back into the original order of demo_keys
+    results_dict = {key: (success, data) for key, success, data in results}
+    results = [(key, results_dict[key][0], results_dict[key][1]) for key in demo_keys if key in results_dict]
+                
     # Write results in the main process to a new file
     success_count = 0
     fail_count = 0
