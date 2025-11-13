@@ -10,7 +10,6 @@ import multiprocessing
 
 from torch.utils.data import Dataset
 from diffusion_policy.common.pytorch_util import dict_apply
-from diffusion_policy.dataset.base_dataset import BaseImageDataset
 from diffusion_policy.model.common.normalizer import LinearNormalizer
 from diffusion_policy.model.common.rotation_transformer import RotationTransformer
 from diffusion_policy.common.sampler import ActionSequenceSampler, get_val_mask

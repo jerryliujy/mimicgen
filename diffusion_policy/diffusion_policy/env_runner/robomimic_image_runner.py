@@ -8,6 +8,7 @@ import tqdm
 import h5py
 import math
 import dill
+import hydra
 import wandb.sdk.data_types.video as wv
 from diffusion_policy.gym_util.async_vector_env import AsyncVectorEnv
 from diffusion_policy.gym_util.sync_vector_env import SyncVectorEnv
@@ -70,6 +71,10 @@ class RobomimicImageRunner(BaseImageRunner):
 
         if n_envs is None:
             n_envs = n_train + n_test
+            
+        # resolve dataset paths
+        original_cwd = hydra.utils.get_original_cwd()
+        dataset_path = os.path.join(original_cwd, dataset_path)
 
         # assert n_obs_steps <= n_action_steps
         dataset_path = os.path.expanduser(dataset_path)

@@ -22,13 +22,13 @@ def weights_init_encoder(m):
         nn.init.orthogonal_(m.weight.data)
         m.bias.data.fill_(0.0)
     elif isinstance(m, nn.Conv1d) or isinstance(m, nn.ConvTranspose1d):
-        assert m.weight.size(2) == m.weight.size(3)
+        # For Conv1d, weight shape is (out_channels, in_channels, kernel_size)
         m.weight.data.fill_(0.0)
         m.bias.data.fill_(0.0)
         mid = m.weight.size(2) // 2
         gain = nn.init.calculate_gain("relu")
-        nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
-
+        nn.init.orthogonal_(m.weight.data[:, :, mid], gain)
+        
 
 class EncoderMLP(nn.Module):
     def __init__(
@@ -76,7 +76,7 @@ class Encoder1DCNN(nn.Module):
             blocks.append(nn.Dropout(dropout))
             current_dim = dim
         self.encoder = nn.Sequential(*blocks)
-        self.fc = nn.Linear(current_dim, output_dim)
+        self.fc = nn.Conv1d(down_dims[-1], output_dim, 1) 
         self.apply(weights_init_encoder)
 
     def forward(self, x):
@@ -85,7 +85,7 @@ class Encoder1DCNN(nn.Module):
         return state
 
         
-class DecoderConv1D(nn.Module):
+class Decoder1DCNN(nn.Module):
     def __init__(self, 
                  input_dim, 
                  output_dim, 
@@ -123,7 +123,7 @@ class ActionVqVae(ModuleAttrMixin):
         vqvae_groups=4,
         encoder_loss_multiplier=1.0,
         act_scale=1.0,
-        use_mlp=True,
+        use_mlp=False,  #TODO: You should set it to False as mlp is not ready
         dropout=0.2
     ):
         super(ActionVqVae, self).__init__()
@@ -164,10 +164,10 @@ class ActionVqVae(ModuleAttrMixin):
                 down_dims=down_dims,
                 dropout=dropout
             )
-            self.decoder = Encoder1DCNN(
+            self.decoder = Decoder1DCNN(
                 input_dim=n_latent_dims,
                 output_dim=input_dim_w,
-                down_dims=list(reversed(down_dims)),
+                up_dims=list(reversed(down_dims)),
                 dropout=dropout
             )
             
@@ -205,15 +205,17 @@ class ActionVqVae(ModuleAttrMixin):
             # state_rep: (B, D, T_latent)
             state_rep_flat = state_rep.permute(0, 2, 1) # (B, T_latent, D)
 
-        state_rep_flat, _, _ = self.vq_layer(state_rep_flat)
+        state_vq, _, _ = self.vq_layer(state_rep_flat)
         
-        if self.use_mlp:
-            state_vq = state_rep_flat.squeeze(1) # (B, D)
-        else:
-            state_vq = state_rep_flat.permute(0, 2, 1) # (B, D, T_latent)
-
         return state_vq
-
+    
+    
+    def decode(self, state_vq):
+        if self.use_mlp:
+            state_vq = state_vq.squeeze(1)
+        dec_out = self.get_action_from_latent(state_vq) * self.act_scale
+        return dec_out
+        
         
     def forward(self, state):
         # state: (B, T, A)

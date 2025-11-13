@@ -309,8 +309,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         
         # encode action to latent space
         with torch.no_grad():
-            z = self.action_vq_vae.encode(nactions.reshape(batch_size * horizon, -1))
-        z = z.reshape(batch_size, horizon, -1)
+            z = self.action_vq_vae.encode(nactions)
 
         global_cond = None
         trajectory = z

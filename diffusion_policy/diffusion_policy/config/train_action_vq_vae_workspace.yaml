@@ -27,7 +27,7 @@ policy:
   vqvae_groups: 2
   encoder_loss_multiplier: 1.0
   act_scale: 1.0
-  use_mlp: true
+  use_mlp: false
 
 dataloader:
   batch_size: 2048

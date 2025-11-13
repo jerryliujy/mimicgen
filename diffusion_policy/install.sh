@@ -14,6 +14,10 @@ pip install -r requirements.txt
 
 python -m pip install git+https://github.com/facebookresearch/sam2.git
 pip install --no-build-isolation "git+https://github.com/facebookresearch/pytorch3d.git"
+pip install PyOpenGL_accelerate patchelf
+
+sudo apt-get install libegl-dev libglx-mesa0 libglfw3 libosmesa6-dev libgl1-mesa-dev
+export MUJOCO_GL=egl
 
 # pip install autodistill
 
