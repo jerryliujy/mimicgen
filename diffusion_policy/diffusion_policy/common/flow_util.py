@@ -142,19 +142,3 @@ def generate_flow_from_frames(frames, flow_estimator, interval=12, target_size=2
         flow = cv2.resize(flow, (w,h), interpolation=cv2.INTER_NEAREST)
         flow_arr[i] = flow
     return flow_arr
-    # T, H, W, C = frames.shape
-    # flows = []
-    # for t in range(T):
-    #     t2 = min(t + interval, T - 1)
-    #     f1 = frames[t]
-    #     f2 = frames[t2]
-    #     f1 = cv2.resize(f1, dsize=(target_size, target_size), interpolation=cv2.INTER_CUBIC)
-    #     f2 = cv2.resize(f2, dsize=(target_size, target_size), interpolation=cv2.INTER_CUBIC)
-    #     uv = flow_estimator.predict(f1, f2)
-    #     uv = cv2.resize(uv, dsize=(H, W), interpolation=cv2.INTER_CUBIC)
-    #     uv = np.stack([uv[..., 0], uv[..., 1], (uv[..., 0] + uv[..., 1]) / 2], axis=-1)  # add the third channel
-    #     flows.append(uv)
-    # return np.stack(flows, axis=0)
-
-
-
