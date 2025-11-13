@@ -38,41 +38,35 @@ def worker(args):
 
 @click.command()
 @click.option('-i', '--input', required=True, help='input hdf5 path')
-@click.option('-o', '--output', required=False, help='output hdf5 path. Default to input path with _flow suffix')
 @click.option('-v', '--view', required=True, help='camera view to process')
 @click.option('--interval', default=12, type=int, help='frame interval for flow computation')
 @click.option('-n', '--num_workers', default=4, type=int)
 @click.option('-t', '--target_size', default=224, type=int, help='resize the shorter side of the image to this size before flow computation')
-def main(input, output, view, interval, num_workers, target_size):
+def main(input, view, interval, num_workers, target_size):
     # process inputs
-    input = pathlib.Path(input).expanduser()
-    assert input.is_file()
+    input_path = pathlib.Path(input).expanduser()
+    assert input_path.is_file()
 
-    if output is None:
-        output = input
-    else:
-        output = pathlib.Path(output).expanduser()
-        assert output.parent.is_dir()
-        assert not output.is_dir()
-        if input != output:
-            shutil.copy(input, output)
+    output_path = input_path.parent.joinpath(input_path.stem + '_flow' + input_path.suffix)
+    print(f"Input file: {input_path}")
+    print(f"Output file for flow data: {output_path}")
         
     if num_workers is None:
         num_workers = mp.cpu_count()
         
-    with h5py.File(input, 'r') as f:
+    with h5py.File(input_path, 'r') as f:
         demo_keys = sorted(list(f['data'].keys()))
         
     # run
     with mp.Pool(num_workers) as pool:
         # Note: output_path is removed from worker arguments
-        results = list(tqdm(pool.map(worker, [(input, key, view, interval, target_size) for key in demo_keys])))
+        results = list(tqdm(pool.map(worker, [(input_path, key, view, interval, target_size) for key in demo_keys])))
     
-    # Write results in the main process
+    # Write results in the main process to a new file
     success_count = 0
     fail_count = 0
-    print(f"Writing {len(results)} results to {output}...")
-    with h5py.File(output, 'r+') as f:
+    print(f"Writing {len(results)} results to {output_path}...")
+    with h5py.File(output_path, 'w') as f:
         for demo_key, success, result_data in tqdm(results):
             if success:
                 flow_arr = result_data

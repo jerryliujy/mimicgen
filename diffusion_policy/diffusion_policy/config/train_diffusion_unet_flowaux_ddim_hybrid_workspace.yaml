@@ -72,7 +72,7 @@ policy:
   flow_weight: 1
   action_weight: 1
 
-  action_vae_path: data/pretrained/action_vae/2024.10.05-23.59.28_train_action_vae_workspace_default/best.ckpt
+  action_vae_path: data/checkpoints/latest.ckpt
 
   # scheduler.step params
   # predict_epsilon: True

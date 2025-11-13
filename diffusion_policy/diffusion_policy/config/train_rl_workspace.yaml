@@ -1,0 +1,57 @@
+# @package _global_
+
+# Hydra settings
+hydra:
+  run:
+    dir: ./outputs/train_rl_chunker/${now:%Y.%m.%d}/${now:%H.%M.%S}_${hydra.job.name}
+  sweep:
+    dir: ./outputs/multirun/${now:%Y.%m.%d}/${now:%H.%M.%S}
+    subdir: ${hydra.job.num}
+  job:
+    name: ${task_name}
+
+# General training settings
+num_episodes: 10000
+max_episode_steps: 1000
+log_interval: 10
+save_interval: 100
+task_name: adroit_pen_rl_chunker # Example task name
+
+# Environment config 
+env:
+  name: 'pen-v1' 
+  # Add other environment-specific configs if needed
+
+# Policy config
+policy:
+  # These should match your pre-trained model's config
+  _target_: diffusion_policy.policy.rl_dp.RLDPPolicy
+  action_dim: 7
+  n_obs_steps: 2
+  n_action_steps: 8
+  horizon: 16
+  num_inference_timesteps: 10
+  num_samples: 1
+
+  noise_scheduler:
+    _target_: diffusers.schedulers.DDPMScheduler
+    num_train_timesteps: 100
+    beta_schedule: "squaredcos_cap_v2"
+    clip_sample: True
+    prediction_type: "epsilon"
+
+  # RL specific settings
+  rl:
+    lr: 1e-4
+    gamma: 0.99
+
+# Workspace config (simplified for this script)
+# In a real setup, you would have a full workspace config
+# to load datasets, models, etc.
+workspace:
+  _target_: diffusion_policy.workspace.base_workspace.BaseWorkspace
+
+# Pre-trained model checkpoint path
+# You MUST update this to your actual checkpoint
+checkpoint_path: "path/to/your/pretrained_model.ckpt"
+

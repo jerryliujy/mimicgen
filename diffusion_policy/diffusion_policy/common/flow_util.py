@@ -28,7 +28,7 @@ class InputPadder:
 
 class FlowPredictor:
     def __init__(self):
-        self.ckpt_path = '/home/workspace/diffusion_policy/ckpts/things_288960.pth'
+        self.ckpt_path = '/workspace/mimicgen/diffusion_policy/data/checkpoints/things_288960.pth'
         self.device = 'cuda:0'
 
 
@@ -44,7 +44,7 @@ class FlowFormerWrapper(FlowPredictor):
     def __init__(self):
         super().__init__()
         
-        flowformer_dir = '/home/workspace/FlowFormerPlusPlus'
+        flowformer_dir = '/workspace/mimicgen/FlowFormerPlusPlus'
         sys.path.append(flowformer_dir)
         try:
             from core.FlowFormer import build_flowformer

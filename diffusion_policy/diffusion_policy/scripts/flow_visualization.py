@@ -16,8 +16,8 @@ from diffusion_policy.common.flow_viz import flow_to_image
 
 
 @click.command()
-@click.option('-i', '--input', required=True, help='Input HDF5 file path.')
-@click.option('-o', '--output', required=True, help='Output video file path (e.g., video.mp4).')
+@click.option('-i', '--input', required=True, help='Input HDF5 file path for observation data.')
+@click.option('-o', '--output', required=False, help='Output video file path (e.g., video.mp4). If not provided, a default name will be generated.')
 @click.option('-d', '--demo_key', required=True, help='Demonstration key to visualize (e.g., demo_0).')
 @click.option('-v', '--view', default='agentview', help='Camera view to process.')
 @click.option('--fps', default=30, type=int, help='Frames per second for the output video.')
@@ -28,10 +28,20 @@ def main(input, output, demo_key, view, fps, save_frames):
     The left side of the video shows the original image, and the right side shows the flow.
     """
     input_path = pathlib.Path(input).expanduser()
-    output_path = pathlib.Path(output).expanduser()
+    # Infer flow file path from the input observation file path
+    flow_input_path = input_path.parent.joinpath(input_path.stem + '_flow' + input_path.suffix)
+    
+    if output is None:
+        # Generate a default output path if not provided
+        output_path = input_path.parent.joinpath(f"{input_path.stem}_{demo_key}_flow_vis.mp4")
+    else:
+        output_path = pathlib.Path(output).expanduser()
 
     if not input_path.is_file():
-        print(f"Error: Input file not found at {input_path}")
+        print(f"Error: Input observation file not found at {input_path}")
+        return
+    if not flow_input_path.is_file():
+        print(f"Error: Inferred flow file not found at {flow_input_path}")
         return
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,15 +49,25 @@ def main(input, output, demo_key, view, fps, save_frames):
     if save_frames:
         frame_output_path.mkdir(parents=True, exist_ok=True)
 
-    print(f"Reading data for {demo_key} from {input_path}")
+    print(f"Reading observation data for {demo_key} from {input_path}")
+    print(f"Reading flow data for {demo_key} from {flow_input_path}")
+    
+    # Read observation data from the original file
     with h5py.File(input_path, 'r') as f:
         try:
             # Load original images (T, H, W, C)
             obs_arr = f[f'data/{demo_key}/obs/{view}'][:]
+        except KeyError as e:
+            print(f"Error: Observation data not found in {input_path}. Missing key: {e}")
+            return
+
+    # Read flow data from the separate flow file
+    with h5py.File(flow_input_path, 'r') as f:
+        try:
             # Load flow data (T, 2, H, W)
             flow_arr = f[f'data/{demo_key}/flow/{view}'][:]
         except KeyError as e:
-            print(f"Error: Data not found in HDF5 file. Missing key: {e}")
+            print(f"Error: Flow data not found in {flow_input_path}. Missing key: {e}")
             return
 
     num_frames, height, width, _ = obs_arr.shape
