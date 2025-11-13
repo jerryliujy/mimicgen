@@ -1,3 +1,4 @@
+import pathlib
 from typing import Dict, List
 import torch
 import numpy as np
@@ -456,19 +457,31 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
 
                 demo_idx_offset = 0
                 for path in resolved_dataset_paths:
-                    with h5py.File(path, 'r') as file:
-                        if 'data' not in file:
-                            continue
-                        demos = file['data']
+                    flow_path = pathlib.Path(path).parent.joinpath(pathlib.Path(path).stem + '_flow' + pathlib.Path(path).suffix)
+                    
+                    file_handle = h5py.File(path, 'r')
+                    flow_file_handle = h5py.File(flow_path, 'r') if data_type == 'flow' and flow_path.is_file() else None
+                    
+                    try:
+                        demos = file_handle['data']
                         for i in range(len(demos)):
                             demo_key = f'demo_{i}'
                             if demo_key not in demos:
                                 continue
                             global_demo_idx = demo_idx_offset + i
+                            
+                            current_file = file_handle
+                            if data_type == 'flow':
+                                if flow_file_handle and f'data/{demo_key}' in flow_file_handle:
+                                    current_file = flow_file_handle
+                                else:
+                                    continue # Skip if flow file or demo_key is not available
+
                             hdf5_key = f"data/{demo_key}/{data_type}/{hdf5_obs_key}"
-                            if hdf5_key not in file:
+                            if hdf5_key not in current_file:
                                 continue
-                            demo_len = file[hdf5_key].shape[0]
+                            
+                            demo_len = current_file[hdf5_key].shape[0]
                             for hdf5_idx in range(demo_len):
                                 if len(futures) >= max_inflight_tasks:
                                     # limit number of inflight tasks
@@ -482,8 +495,12 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                                 zarr_idx = episode_starts[global_demo_idx] + hdf5_idx
                                 futures.add(
                                     executor.submit(img_copy, 
-                                        img_arr, zarr_idx, path, hdf5_key, hdf5_idx))
+                                        img_arr, zarr_idx, str(current_file.filename), hdf5_key, hdf5_idx))
                         demo_idx_offset += len(demos)
+                    finally:
+                        file_handle.close()
+                        if flow_file_handle:
+                            flow_file_handle.close()
 
             completed, futures = concurrent.futures.wait(futures)
             for f in completed:
