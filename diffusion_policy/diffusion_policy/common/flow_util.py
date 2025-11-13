@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import cv2
+from tqdm import tqdm
 
 class InputPadder:
     """Pads images so that dimensions are divisible by a factor."""
@@ -111,20 +112,33 @@ def get_flow_predictor() -> FlowPredictor:
     return FlowFormerWrapper()
 
 
-def generate_flow_from_frames(frames: np.ndarray, flow_estimator, interval: int = 1, target_size: int = 224) -> np.ndarray:
-    T, H, W, C = frames.shape
-    flows = []
-    for t in range(T):
-        t2 = min(t + interval, T - 1)
-        f1 = frames[t]
-        f2 = frames[t2]
-        f1 = cv2.resize(f1, dsize=(target_size, target_size), interpolation=cv2.INTER_CUBIC)
-        f2 = cv2.resize(f2, dsize=(target_size, target_size), interpolation=cv2.INTER_CUBIC)
-        uv = flow_estimator.predict(f1, f2)
-        uv = cv2.resize(uv, dsize=(H, W), interpolation=cv2.INTER_CUBIC)
-        uv = np.stack([uv[..., 0], uv[..., 1], (uv[..., 0] + uv[..., 1]) / 2], axis=-1)  # add the third channel
-        flows.append(uv)
-    return np.stack(flows, axis=0)
+def generate_flow_from_frames(frames, flow_estimator, interval=12, target_size=224, progress_desc=None):
+    num_frames = len(frames)
+    
+    h, w = frames.shape[1], frames.shape[2]
+    if target_size is not None:
+        if w < h:
+            new_w = target_size
+            new_h = int(h * (new_w / w))
+        else:
+            new_h = target_size
+            new_w = int(w * (new_h / h))
+        th, tw = new_h, new_w
+    else:
+        th, tw = h, w
 
+    res_frames = np.array([cv2.resize(img, (tw, th), interpolation=cv2.INTER_AREA) for img in frames])
+    flow_arr = np.zeros((num_frames, h, w, 2), dtype=np.float32)
+    
+    # Create an iterable with a progress bar if requested
+    frame_indices = range(num_frames - interval)
+    frame_indices = tqdm(frame_indices, desc=progress_desc or "Generating Flow", leave=False)
 
-
+    for i in frame_indices:
+        frame1 = res_frames[i]
+        frame2 = res_frames[i+interval]
+        flow = flow_estimator.predict(frame1, frame2)
+        # resize
+        flow = cv2.resize(flow, (w,h), interpolation=cv2.INTER_NEAREST)
+        flow_arr[i] = flow
+    return flow_arr
