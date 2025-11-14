@@ -301,7 +301,7 @@ def _convert_actions(raw_actions, abs_action, rotation_transformer):
         actions = raw_actions
     return actions
 
-def _get_episode_ends(dataset_paths):
+def _get_episode_ends(dataset_paths, load_flow=False, flow_key=None):
     episode_starts = []
     episode_ends = []
     n_steps = 0
@@ -309,11 +309,16 @@ def _get_episode_ends(dataset_paths):
     for path in tqdm(dataset_paths, desc="Scanning metadata"):
         try:
             with h5py.File(path, 'r') as file:
-                if 'data' not in file: continue
+                if 'data' not in file: 
+                    continue
                 for i in range(len(file['data'])):
                     demo_key = f'demo_{i}'
-                    if demo_key not in file['data']: continue
-                    episode_length = file[f'data/{demo_key}/actions'].shape[0]
+                    if demo_key not in file['data']: 
+                        continue
+                    if load_flow:
+                        episode_length = file[f'data/{demo_key}/flow/{flow_key}'].shape[0]
+                    else:
+                        episode_length = file[f'data/{demo_key}/actions'].shape[0]
                     episode_starts.append(n_steps)
                     n_steps += episode_length
                     episode_ends.append(n_steps)
@@ -337,10 +342,14 @@ def _parallel_load_images(
             with h5py.File(file_path, 'r') as file:
                 zarr_arr[zarr_idx] = file[hdf5_key][hdf5_idx]
                 _ = zarr_arr[zarr_idx] # Verify decoding
-            return True
+            return True, None
         except Exception:
             return False
-
+            # import traceback
+            # err = traceback.format_exc()
+            # return False, f"[{data_type}] file={file_path}, dataset={hdf5_key}, hdf5_idx={hdf5_idx}, zarr_idx={zarr_idx}\n{err}"
+        
+    print(f"Steps: {n_steps}, keys: {keys}")
     with tqdm(total=n_steps * len(keys), desc=f"Loading {data_type} data", mininterval=1.0) as pbar:
         with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
             futures = set()
@@ -359,16 +368,20 @@ def _parallel_load_images(
                 
                 demo_idx_offset = 0
                 for path in dataset_paths:
-                    if not os.path.exists(path): continue
+                    if not os.path.exists(path): 
+                        continue
                     with h5py.File(path, 'r') as file:
-                        if 'data' not in file: continue
-                        num_demos_in_file = len(file['data'])
-                        for i in range(num_demos_in_file):
+                        if 'data' not in file: 
+                            continue
+                        
+                        demos = file['data']
+                        for i in range(len(demos)):
                             demo_key = f'demo_{i}'
-                            if demo_key not in file['data']: continue
-                            
+                            if demo_key not in demos: 
+                                continue
                             hdf5_key = f"data/{demo_key}/{data_type}/{key}"
-                            if hdf5_key not in file: continue
+                            if hdf5_key not in file: 
+                                continue
                             
                             global_demo_idx = demo_idx_offset + i
                             demo_len = file[hdf5_key].shape[0]
@@ -377,16 +390,21 @@ def _parallel_load_images(
                                 if len(futures) >= max_inflight_tasks:
                                     completed, futures = concurrent.futures.wait(futures, return_when=concurrent.futures.FIRST_COMPLETED)
                                     for f in completed:
-                                        if not f.result(): raise RuntimeError(f'Failed to encode {data_type} data!')
+                                        # ok, err = f.result()
+                                        # if not ok:
+                                        #     raise RuntimeError(err)
+                                        if not f.result(): 
+                                            raise RuntimeError(f'Failed to encode {data_type} data!')
                                     pbar.update(len(completed))
                                 
                                 zarr_idx = episode_starts[global_demo_idx] + hdf5_idx
                                 futures.add(executor.submit(img_copy, img_arr, zarr_idx, path, hdf5_key, hdf5_idx))
-                        demo_idx_offset += num_demos_in_file
+                        demo_idx_offset += len(demos)
             
             completed, futures = concurrent.futures.wait(futures)
             for f in completed:
-                if not f.result(): raise RuntimeError(f'Failed to encode {data_type} data!')
+                if not f.result(): 
+                    raise RuntimeError(f'Failed to encode {data_type} data!')
             pbar.update(len(completed))
 
 def _convert_base_to_replay(
@@ -433,11 +451,13 @@ def _convert_base_to_replay(
         demo_idx_offset = 0
         for path in tqdm(dataset_paths, desc=f"Loading {key}", leave=False):
             with h5py.File(path, 'r') as file:
-                if 'data' not in file: continue
+                if 'data' not in file: 
+                    continue
                 num_demos_in_file = len(file['data'])
                 for i in range(num_demos_in_file):
                     demo_key = f'demo_{i}'
-                    if demo_key not in file['data']: continue
+                    if demo_key not in file['data']: 
+                        continue
                     
                     data_chunk = file[f'data/{demo_key}/{data_key}'][:].astype(np.float32)
                     global_demo_idx = demo_idx_offset + i
@@ -466,6 +486,8 @@ def _convert_flow_to_replay(
     if max_inflight_tasks is None: 
         max_inflight_tasks = n_workers * 5
         
+    episode_starts, episode_ends, n_steps = _get_episode_ends(flow_dataset_paths, load_flow=True, flow_key=flow_keys[0])
+
     store = zarr.MemoryStore()
     root = zarr.group(store=store)
     data_group = root.require_group('data', overwrite=True)
@@ -478,10 +500,9 @@ def _convert_flow_to_replay(
     else: 
         flow_dataset_paths = list(flow_dataset_path)
 
-    episode_starts, _, n_steps = _get_episode_ends(flow_dataset_paths)
-    
     flow_keys = [key for key, attr in shape_meta.get('flow', {}).items() if attr.get('type', 'rgb') == 'rgb']
 
+    
     _parallel_load_images(data_group, episode_starts, n_steps, flow_dataset_paths, flow_keys, 'flow', shape_meta, n_workers, max_inflight_tasks)
     
     # Return a buffer-like object (a dict is fine) to be merged
