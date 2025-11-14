@@ -127,9 +127,30 @@ class TrainRLWorkspace(BaseWorkspace):
                     wandb_run.log(step_log)
                     json_logger.log(step_log)
 
-                # --- Checkpointing ---
-                if (self.epoch > 0) and (self.epoch % cfg.training.checkpoint_every == 0):
-                    self.save_checkpoint()
+                # checkpoint
+                if cfg.checkpoint.save_ckpt:
+                    if hasattr(cfg.checkpoint, 'save_specific_steps') and \
+                        self.epoch in cfg.checkpoint.save_specific_steps:
+                        self.save_checkpoint(tag=f"step_{self.epoch}")
+                    elif (self.epoch % cfg.training.checkpoint_every) == 0 and cfg.checkpoint.save_ckpt:
+                        # checkpointing
+                        if cfg.checkpoint.save_last_ckpt:
+                            self.save_checkpoint()
+                        if cfg.checkpoint.save_last_snapshot:
+                            self.save_snapshot()
+
+                        # sanitize metric names
+                        metric_dict = dict()
+                        for key, value in step_log.items():
+                            new_key = key.replace('/', '_')
+                            metric_dict[new_key] = value
+                            
+                # end of epoch
+                # log of last step is combined with validation and rollout
+                if self.is_master:
+                    wandb_run.log(step_log, step=self.global_step)
+                    json_logger.log(step_log)
+                self.epoch += 1
 
         print("RL training finished.")
 
@@ -137,7 +158,7 @@ class TrainRLWorkspace(BaseWorkspace):
 @hydra.main(
     version_base=None,
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")), 
-    config_name="train_rl_pusht_image.yaml") # A new config file for this workspace
+    config_name="train_rl_workspace.yaml") # A new config file for this workspace
 def main(cfg):
     workspace = TrainRLWorkspace(cfg)
     workspace.run()

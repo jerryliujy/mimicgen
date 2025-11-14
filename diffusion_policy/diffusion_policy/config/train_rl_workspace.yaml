@@ -1,57 +1,130 @@
-# @package _global_
+defaults:
+  - _self_
+  - task: coffee_image
 
-# Hydra settings
-hydra:
-  run:
-    dir: ./outputs/train_rl_chunker/${now:%Y.%m.%d}/${now:%H.%M.%S}_${hydra.job.name}
-  sweep:
-    dir: ./outputs/multirun/${now:%Y.%m.%d}/${now:%H.%M.%S}
-    subdir: ${hydra.job.num}
-  job:
-    name: ${task_name}
+name: train_rl_workspace
+_target_: diffusion_policy.workspace.train_rl_workspace.TrainRLWorkspace
 
-# General training settings
-num_episodes: 10000
-max_episode_steps: 1000
-log_interval: 10
-save_interval: 100
-task_name: adroit_pen_rl_chunker # Example task name
+task_name: ${task.name}
+shape_meta: ${task.shape_meta}
+exp_name: "default"
 
-# Environment config 
-env:
-  name: 'pen-v1' 
-  # Add other environment-specific configs if needed
+horizon: 16
+n_obs_steps: 2
+n_action_steps: 8
+n_latency_steps: 0
+dataset_obs_steps: ${n_obs_steps}
+past_action_visible: False
+keypoint_visible_rate: 1.0
+obs_as_global_cond: True
 
-# Policy config
-policy:
-  # These should match your pre-trained model's config
-  _target_: diffusion_policy.policy.rl_dp.RLDPPolicy
-  action_dim: 7
-  n_obs_steps: 2
-  n_action_steps: 8
-  horizon: 16
-  num_inference_timesteps: 10
-  num_samples: 1
+action_generator_policy:
+  _target_: diffusion_policy.policy.diffusion_unet_hybrid_image_policy.DiffusionUnetHybridImagePolicy
 
+  shape_meta: ${shape_meta}
+  
   noise_scheduler:
-    _target_: diffusers.schedulers.DDPMScheduler
+    _target_: diffusers.schedulers.scheduling_ddim.DDIMScheduler
     num_train_timesteps: 100
-    beta_schedule: "squaredcos_cap_v2"
+    beta_start: 0.0001
+    beta_end: 0.02
+    # beta_schedule is important
+    # this is the best we found
+    beta_schedule: squaredcos_cap_v2
     clip_sample: True
-    prediction_type: "epsilon"
+    set_alpha_to_one: True
+    steps_offset: 0
+    prediction_type: epsilon # or sample
 
-  # RL specific settings
-  rl:
-    lr: 1e-4
-    gamma: 0.99
+  flow_encoder:
+    _target_: diffusion_policy.model.vision.flow_adapter.FlowEncoder
+    downscale_factor: 8·
+    channels: ${policy.down_dims}
+    input_dims: [84, 84]
+    nums_rb: 1
+    ksize: 3
+    sk: False
+    use_conv: True
+    compression_factor: 1
+    temporal_attention_nhead: 8
+    attention_block_types: ["Temporal_Self"]
+    temporal_position_encoding: True
+    temporal_position_encoding_max_len: 32  #should be >= obs_horizon
+    rescale_output_factor: 1.0
 
-# Workspace config (simplified for this script)
-# In a real setup, you would have a full workspace config
-# to load datasets, models, etc.
-workspace:
-  _target_: diffusion_policy.workspace.base_workspace.BaseWorkspace
+
+  horizon: ${horizon}
+  n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
+  n_obs_steps: ${n_obs_steps}
+  num_inference_steps: 8
+  obs_as_global_cond: ${obs_as_global_cond}
+  # crop_shape: [76, 76]
+  crop_shape: null
+  diffusion_step_embed_dim: 128
+  down_dims: [256,512,1024]
+  kernel_size: 5
+  n_groups: 8
+  cond_predict_scale: True
+  obs_encoder_group_norm: True
+  eval_fixed_crop: True
+
+  # scheduler.step params
+  # predict_epsilon: True
+
+training:
+  device: "cuda"
+  seed: 42
+  num_epochs: 1002
+  checkpoint_every: 1000
+  gamma: 0.99
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1.0e-4
+  betas: [0.95, 0.999]
+  eps: 1.0e-8
+  weight_decay: 1.0e-6
 
 # Pre-trained model checkpoint path
 # You MUST update this to your actual checkpoint
-checkpoint_path: "path/to/your/pretrained_model.ckpt"
+generator_ckpt_path: "path/to/your/pretrained_model.ckpt"
+
+logging:
+  project: rl_diffusion_policy
+  resume: True
+  mode: online
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  # name: 2025.10.05-00.04.07_${name}_${task_name}_${exp_name}
+  tags: ["${name}", "${task_name}", "${exp_name}"]
+  id: null
+  group: null
+
+checkpoint:
+  save_ckpt: True
+  save_specific_steps: [500, 750]  
+  topk:
+    monitor_key: test_mean_score
+    mode: max
+    k: 5
+    format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+  save_last_ckpt: True
+  save_last_snapshot: False
+
+multi_run:
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+  # run_dir: data/outputs/2025.10.05/00.04.07_${name}_${task_name}
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+  # wandb_name_base: 2025.10.05-00.04.07_${name}_${task_name}_${exp_name}
+
+hydra:
+  job:
+    override_dirname: ${name}
+  run:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    # dir: data/outputs/2025.10.05/00.04.07_${name}_${task_name}
+  sweep:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+    # dir: data/outputs/2025.10.05/00.04.07_${name}_${task_name}
+    subdir: ${hydra.job.num}
+
 
