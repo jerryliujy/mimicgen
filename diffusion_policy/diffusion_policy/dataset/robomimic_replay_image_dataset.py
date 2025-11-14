@@ -339,8 +339,6 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
     episode_starts = list()
     n_steps = 0
     
-    num_demos = 10
-    demos_count = 0
     # First pass: iterate through all files to get metadata
     print(f"Scanning {len(resolved_dataset_paths)} files...")
     for path in tqdm(resolved_dataset_paths, desc="Scanning metadata"):
@@ -350,8 +348,6 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                 continue
             demos = file['data']
             for i in range(len(demos)):
-                if num_demos is not None and demos_count >= num_demos:
-                    break
                 demo_key = f'demo_{i}'
                 if demo_key not in demos:
                     continue
@@ -361,7 +357,6 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                 episode_starts.append(n_steps)
                 episode_ends.append(episode_end)
                 n_steps = episode_end
-                demos_count += 1
 
     _ = meta_group.array('episode_ends', episode_ends, 
         dtype=np.int64, compressor=None, overwrite=True)
@@ -393,8 +388,6 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                     continue
                 demos = file['data']
                 for i in range(len(demos)):
-                    if num_demos is not None and demos_count >= num_demos:
-                        break
                     demo_key = f'demo_{i}'
                     if demo_key not in demos:
                         continue
@@ -413,7 +406,6 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                             rotation_transformer=rotation_transformer
                         )
                     this_data_arr[start_idx:end_idx] = data_chunk
-                    demos_count += 1
                 demo_idx_offset += len(demos)
         
         # verify shape
@@ -473,8 +465,6 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                     try:
                         demos = file_handle['data']
                         for i in range(len(demos)):
-                            if num_demos is not None and demos_count >= num_demos:
-                                break
                             demo_key = f'demo_{i}'
                             if demo_key not in demos:
                                 continue
@@ -507,7 +497,6 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                                     executor.submit(img_copy, 
                                         img_arr, zarr_idx, str(current_file.filename), hdf5_key, hdf5_idx))
 
-                            demos_count += 1
                         demo_idx_offset += len(demos)
                     finally:
                         file_handle.close()

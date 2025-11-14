@@ -58,7 +58,7 @@ policy:
     vqvae_groups: 2
     encoder_loss_multiplier: 1.0
     act_scale: 1.0
-    use_mlp: true
+    use_mlp: false
 
   horizon: ${horizon}
   n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
@@ -78,7 +78,7 @@ policy:
   flow_weight: 1
   action_weight: 1
 
-  action_vae_path: data/checkpoints/latest.ckpt
+  action_vae_path: data/checkpoints/cnn/latest.ckpt
 
   # scheduler.step params
   # predict_epsilon: True
