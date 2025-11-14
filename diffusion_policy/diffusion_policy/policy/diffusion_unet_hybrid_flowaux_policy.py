@@ -302,7 +302,8 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         assert 'valid_mask' not in batch
         nobs = self.normalizer.normalize(batch['obs'])
         nactions = self.normalizer['action'].normalize(batch['action'])
-        nflow = self.normalizer['flow'].normalize(batch['flow']) if batch.get('flow', None) is not None else None
+        nflow = self.normalizer.normalize(batch['flow']) if batch.get('flow', None) is not None else None
+        nflow = nflow['flow_agentview_image']  # only support agentview flow for now
         batch_size = nactions.shape[0]
         horizon = nactions.shape[1]
         n_obs_steps = self.n_obs_steps
@@ -363,6 +364,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             
         # action loss
         with torch.no_grad():
+            predicted_z = predicted_z.permute(0, 2, 1)  # (B, D, T)
             recon_action = self.action_vq_vae.decode(predicted_z)
         recon_a_loss = F.mse_loss(recon_action, nactions, reduction='mean')
         

@@ -124,31 +124,26 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
                 flow_cache_lock_path = flow_cache_path + '.lock'
                 print('Acquiring lock on flow cache.')
                 with FileLock(flow_cache_lock_path):
-                    # Check if flow data is already in the buffer
-                    flow_keys_in_buffer = [f'flow_{key}' for key in shape_meta.get('flow', {}).keys()]
-                    is_flow_loaded = all(key in replay_buffer.keys() for key in flow_keys_in_buffer)
-
-                    if not is_flow_loaded:
-                        if not os.path.exists(flow_cache_path):
-                            print('Flow cache does not exist. Creating!')
-                            # Create a temporary buffer for flow data
-                            flow_replay_buffer = _convert_flow_to_replay(
-                                shape_meta=shape_meta,
-                                flow_dataset_path=flow_dataset_paths
-                            )
-                            print('Saving flow cache to disk.')
-                            with zarr.ZipStore(flow_cache_path, mode='w') as zip_store:
-                                flow_replay_buffer.save_to_store(store=zip_store)
-                            # Merge flow data into the main replay buffer
-                            for key, value in flow_replay_buffer.items():
+                    if not os.path.exists(flow_cache_path):
+                        print('Flow cache does not exist. Creating!')
+                        # Create a temporary buffer for flow data
+                        flow_replay_buffer = _convert_flow_to_replay(
+                            shape_meta=shape_meta,
+                            flow_dataset_path=flow_dataset_paths
+                        )
+                        print('Saving flow cache to disk.')
+                        with zarr.ZipStore(flow_cache_path, mode='w') as zip_store:
+                            flow_replay_buffer.save_to_store(store=zip_store)
+                        # Merge flow data into the main replay buffer
+                        for key, value in flow_replay_buffer.items():
+                            replay_buffer.data.update({key: value})
+                    else:
+                        print('Loading cached flow data from Disk.')
+                        with zarr.ZipStore(flow_cache_path, mode='r') as zip_store:
+                            temp_rb = ReplayBuffer.copy_from_store(src_store=zip_store, store=zarr.MemoryStore())
+                            for key, value in temp_rb.items():
                                 replay_buffer.data.update({key: value})
-                        else:
-                            print('Loading cached flow data from Disk.')
-                            with zarr.ZipStore(flow_cache_path, mode='r') as zip_store:
-                                temp_rb = ReplayBuffer.copy_from_store(src_store=zip_store, store=zarr.MemoryStore())
-                                for key, value in temp_rb.items():
-                                    replay_buffer.data.update({key: value})
-                            print('Loaded flow cache!')
+                        print('Loaded flow cache!')
         else:
             # Fallback to old behavior if not using cache
             replay_buffer = _convert_base_to_replay(
@@ -266,10 +261,10 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
         
         flow_dict = dict()
         for key in self.flow_keys:
-            flow_key_name = f'flow_{key}'
-            if flow_key_name in data:
-                flow_dict[key] = np.moveaxis(data[flow_key_name][to_slice], -1, 1).astype(np.float32)
-                del data[flow_key_name]
+            flow_key = f'flow_{key}'
+            if flow_key in data:
+                flow_dict[key] = np.moveaxis(data[flow_key][to_slice], -1, 1).astype(np.float32)
+                del data[flow_key]
         
         torch_data = {
             'obs': dict_apply(obs_dict, torch.from_numpy),
@@ -486,13 +481,6 @@ def _convert_flow_to_replay(
     if max_inflight_tasks is None: 
         max_inflight_tasks = n_workers * 5
         
-    if isinstance(flow_dataset_path, str):
-        flow_dataset_paths = [flow_dataset_path]
-    else: 
-        flow_dataset_paths = list(flow_dataset_path)
-
-    flow_keys = [key for key, attr in shape_meta.get('flow', {}).items() if attr.get('type', 'rgb') == 'rgb']
-
     episode_starts, episode_ends, n_steps = _get_episode_ends(flow_dataset_paths, load_flow=True, flow_key=flow_keys[0])
 
     store = zarr.MemoryStore()
@@ -501,6 +489,14 @@ def _convert_flow_to_replay(
     meta_group = root.require_group('meta', overwrite=True)
     _ = meta_group.array('episode_ends', episode_ends, 
         dtype=np.int64, compressor=None, overwrite=True)
+
+    if isinstance(flow_dataset_path, str):
+        flow_dataset_paths = [flow_dataset_path]
+    else: 
+        flow_dataset_paths = list(flow_dataset_path)
+
+    flow_keys = [key for key, attr in shape_meta.get('flow', {}).items() if attr.get('type', 'rgb') == 'rgb']
+
     
     _parallel_load_images(data_group, episode_starts, n_steps, flow_dataset_paths, flow_keys, 'flow', shape_meta, n_workers, max_inflight_tasks)
     
