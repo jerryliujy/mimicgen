@@ -486,6 +486,13 @@ def _convert_flow_to_replay(
     if max_inflight_tasks is None: 
         max_inflight_tasks = n_workers * 5
         
+    if isinstance(flow_dataset_path, str):
+        flow_dataset_paths = [flow_dataset_path]
+    else: 
+        flow_dataset_paths = list(flow_dataset_path)
+
+    flow_keys = [key for key, attr in shape_meta.get('flow', {}).items() if attr.get('type', 'rgb') == 'rgb']
+
     episode_starts, episode_ends, n_steps = _get_episode_ends(flow_dataset_paths, load_flow=True, flow_key=flow_keys[0])
 
     store = zarr.MemoryStore()
@@ -494,14 +501,6 @@ def _convert_flow_to_replay(
     meta_group = root.require_group('meta', overwrite=True)
     _ = meta_group.array('episode_ends', episode_ends, 
         dtype=np.int64, compressor=None, overwrite=True)
-
-    if isinstance(flow_dataset_path, str):
-        flow_dataset_paths = [flow_dataset_path]
-    else: 
-        flow_dataset_paths = list(flow_dataset_path)
-
-    flow_keys = [key for key, attr in shape_meta.get('flow', {}).items() if attr.get('type', 'rgb') == 'rgb']
-
     
     _parallel_load_images(data_group, episode_starts, n_steps, flow_dataset_paths, flow_keys, 'flow', shape_meta, n_workers, max_inflight_tasks)
     
