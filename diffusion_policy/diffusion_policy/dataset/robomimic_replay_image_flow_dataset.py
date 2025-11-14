@@ -469,7 +469,9 @@ def _convert_flow_to_replay(
     store = zarr.MemoryStore()
     root = zarr.group(store=store)
     data_group = root.require_group('data', overwrite=True)
-    # Flow buffer doesn't need its own meta, it will be merged
+    meta_group = root.require_group('meta', overwrite=True)
+    _ = meta_group.array('episode_ends', episode_ends, 
+        dtype=np.int64, compressor=None, overwrite=True)
 
     if isinstance(flow_dataset_path, str):
         flow_dataset_paths = [flow_dataset_path]
