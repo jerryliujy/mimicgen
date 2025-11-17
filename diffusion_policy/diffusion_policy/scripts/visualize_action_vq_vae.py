@@ -206,8 +206,8 @@ def plot_latents(
 
 """
 python diffusion_policy/scripts/visualize_action_vq_vae.py \
-  --checkpoint data/outputs/.../checkpoints/latest.ckpt \
-  --output media/latents/coffee_demo0.png \
+  --checkpoint data/checkpoints/mlp/latest.ckpt \
+  --output data/media/latents/coffee_demo0.png \
   --demo-idx 0 \
   --stride 2 \
   --reducer tsne \
