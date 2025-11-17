@@ -74,6 +74,7 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
             shape_meta: dict,
             dataset_path: str,
             horizon=1,
+            n_action_primitives=1,
             pad_before=0,
             pad_after=0,
             n_obs_steps=None,
@@ -81,7 +82,9 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
             rotation_rep='rotation_6d',
             use_cache=False,
             seed=42,
-            val_ratio=0.0
+            val_ratio=0.0,
+            action_pre_encode=True,
+            **kwargs
         ):
         super().__init__()
         rotation_transformer = RotationTransformer(
@@ -167,7 +170,24 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
         key_first_k = dict()
         if n_obs_steps is not None:
             for key in rgb_keys + lowdim_keys:
-                key_first_k[key] = n_obs_steps
+                key_first_k[key] = n_obs_steps         
+                
+        self.replay_buffer = replay_buffer
+        self.shape_meta = shape_meta
+        self.rgb_keys = rgb_keys
+        self.lowdim_keys = lowdim_keys
+        self.flow_keys = flow_keys
+        self.abs_action = abs_action
+        self.n_obs_steps = n_obs_steps
+        self.horizon = horizon
+        self.n_action_primitives = n_action_primitives
+        self.pad_before = pad_before
+        self.pad_after = pad_after
+        self.action_pre_encode = action_pre_encode
+                
+        if action_pre_encode:
+            normalizer = self.get_normalizer()
+            self._pre_encode_actions(kwargs['action_encoder'], normalizer)
 
         val_mask = get_val_mask(
             n_episodes=replay_buffer.n_episodes, 
@@ -176,24 +196,14 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
         train_mask = ~val_mask
         sampler = SequenceSampler(
             replay_buffer=replay_buffer, 
-            sequence_length=horizon,
+            sequence_length=horizon+n_action_primitives-1,
             pad_before=pad_before, 
             pad_after=pad_after,
             episode_mask=train_mask,
             key_first_k=key_first_k)
         
-        self.replay_buffer = replay_buffer
         self.sampler = sampler
-        self.shape_meta = shape_meta
-        self.rgb_keys = rgb_keys
-        self.lowdim_keys = lowdim_keys
-        self.flow_keys = flow_keys
-        self.abs_action = abs_action
-        self.n_obs_steps = n_obs_steps
         self.train_mask = train_mask
-        self.horizon = horizon
-        self.pad_before = pad_before
-        self.pad_after = pad_after
 
     def get_validation_dataset(self):
         val_set = copy.copy(self)
@@ -248,6 +258,11 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
         return len(self.sampler)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """
+        Samples a sequence (an episode) from the replay buffer.
+        The insight is that we use action encoder to encoder actions of horizon length.
+        The time dimension of the input action becomes batch // horizon.
+        """
         data = self.sampler.sample_sequence(idx)
         to_slice = slice(self.n_obs_steps)
 
@@ -270,10 +285,43 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
             'obs': dict_apply(obs_dict, torch.from_numpy),
             'action': torch.from_numpy(data['action'].astype(np.float32))
         }
+        if self.action_pre_encode:
+            torch_data['z'] = torch.from_numpy(data['z'].astype(np.float32))
+            
         if len(flow_dict) > 0:
             torch_data['flow'] = dict_apply(flow_dict, torch.from_numpy)
             
         return torch_data
+
+
+    def _pre_encode_actions(self, action_vq_vae, normalizer):
+        # Ensure VAE is on the correct device and in eval mode
+        device = action_vq_vae.device
+        action_vq_vae.eval()
+
+        # Get all actions and normalize them
+        all_actions = torch.from_numpy(self.replay_buffer['action'][:]).to(device)
+        nactions = normalizer['action'].normalize(all_actions)
+
+        # Encode actions in batches to avoid OOM
+        batch_size = 256
+        encoded_actions = []
+        with torch.no_grad():
+            for i in tqdm(range(0, len(nactions), batch_size), desc="Pre-encoding actions"):
+                batch = nactions[i:i+batch_size]
+                # Sliding window encoding
+                z_list = []
+                for j in range(self.n_action_primitives):
+                    action_window = batch[:, j:j+self.horizon]
+                    z = action_vq_vae.encode(action_window)
+                    z_list.append(z.unsqueeze(1))
+                encoded_batch = torch.cat(z_list, dim=1) # (batch_size, n_action_primitives, D_latent)
+                encoded_actions.append(encoded_batch.cpu().numpy())
+        
+        # Replace raw actions with encoded actions in the replay buffer
+        encoded_actions = np.concatenate(encoded_actions, axis=0)
+        self.replay_buffer.data['z'] = encoded_actions
+        
 
 # ==================== Helper Functions ====================
 
@@ -295,6 +343,7 @@ def _convert_actions(raw_actions, abs_action, rotation_transformer):
             raw_actions = raw_actions.reshape(-1,20)
         actions = raw_actions
     return actions
+
 
 def _get_episode_ends(dataset_paths, load_flow=False, flow_key=None):
     episode_starts = []
@@ -468,7 +517,7 @@ def _convert_base_to_replay(
     _parallel_load_images(data_group, episode_starts, n_steps, dataset_paths, rgb_keys, 'obs', shape_meta, n_workers, max_inflight_tasks)
     
     replay_buffer = ReplayBuffer(root)
-    return replay_buffer
+    return replay_buffer, episode_starts, episode_ends
 
 def _convert_flow_to_replay(
     shape_meta, 

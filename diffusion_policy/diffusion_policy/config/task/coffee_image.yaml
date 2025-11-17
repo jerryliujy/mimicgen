@@ -88,6 +88,7 @@ dataset:
   shape_meta: *shape_meta
   dataset_path: *dataset_path
   horizon: ${horizon}
+  n_action_primitives: ${n_action_primitives}
   pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
   pad_after: ${eval:'${n_action_steps}-1'}
   n_obs_steps: ${dataset_obs_steps}
@@ -96,3 +97,4 @@ dataset:
   use_cache: True
   seed: 42
   val_ratio: 0.02
+  action_pre_encode: ${action_pre_encode}

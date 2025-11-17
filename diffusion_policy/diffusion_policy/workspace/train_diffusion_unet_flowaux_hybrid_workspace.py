@@ -71,7 +71,7 @@ class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
 
         # configure dataset
         dataset: BaseImageDataset
-        dataset = hydra.utils.instantiate(cfg.task.dataset)
+        dataset = hydra.utils.instantiate(cfg.task.dataset, action_encoder=self.model.action_vq_vae)
         assert isinstance(dataset, BaseImageDataset)
         train_sampler = None
         if self.local_rank != -1:

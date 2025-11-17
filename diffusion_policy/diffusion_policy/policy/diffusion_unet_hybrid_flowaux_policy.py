@@ -32,6 +32,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             flow_decoder,
             action_vq_vae,
             horizon, 
+            n_action_primitives,
             n_action_steps, 
             n_obs_steps,
             action_emb_dim=256,  # the latent dim of action encoder
@@ -47,6 +48,8 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             eval_fixed_crop=False,
             flow_weight=0.1,
             action_weight=0.1,
+            action_vae_path=None,
+            action_pre_encode=True,
             # parameters passed to step
             **kwargs):
         super().__init__()
@@ -156,12 +159,15 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             n_groups=n_groups,
             cond_predict_scale=cond_predict_scale
         )
+
+        state_dict = torch.load(action_vae_path, map_location='cpu')
+        action_vq_vae.load_state_dict(state_dict['model'])
+        self.action_vq_vae = action_vq_vae
         
         self.obs_encoder = obs_encoder
         self.model = model
         self.noise_scheduler = noise_scheduler
         self.flow_decoder = flow_decoder
-        self.action_vq_vae = action_vq_vae
         self.mask_generator = LowdimMaskGenerator(
             action_dim=action_emb_dim,
             obs_dim=0 if obs_as_global_cond else obs_feature_dim,
@@ -171,6 +177,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         )
         self.normalizer = LinearNormalizer()
         self.horizon = horizon
+        self.n_action_primitives = n_action_primitives
         self.obs_feature_dim = obs_feature_dim
         self.action_emb_dim = action_emb_dim
         self.n_action_steps = n_action_steps
@@ -178,6 +185,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         self.obs_as_global_cond = obs_as_global_cond
         self.action_weight = action_weight
         self.flow_weight = flow_weight
+        self.action_pre_encode = action_pre_encode
         self.kwargs = kwargs
 
         if num_inference_steps is None:
@@ -238,7 +246,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         nobs = self.normalizer.normalize(obs_dict)
         value = next(iter(nobs.values()))
         B, To = value.shape[:2]
-        T = self.horizon
+        T = self.n_action_primitives
         Do = self.obs_feature_dim
         action_emb_dim = self.action_emb_dim
 
@@ -276,10 +284,12 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
                 global_cond=None,
                 **self.kwargs)
             
-            predicted_z = predicted_trajectory[..., :action_emb_dim]
-
+            predicted_z = predicted_trajectory[..., :action_emb_dim]  # (B, T, D)
+            
+        predicted_z = predicted_z.view(-1, action_emb_dim)  # (B*T, D)
         with torch.no_grad():
             naction_pred = self.action_vq_vae.decode(predicted_z)
+        naction_pred = naction_pred.view(B, T, -1)  # (B, T, A)
         
         action_pred = self.normalizer['action'].unnormalize(naction_pred)
 
@@ -302,15 +312,24 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         assert 'valid_mask' not in batch
         nobs = self.normalizer.normalize(batch['obs'])
         nactions = self.normalizer['action'].normalize(batch['action'])
+        z = batch['z']
+        assert z is not None if self.action_pre_encode else True, "z must be provided in batch if action_pre_encode is False"
+        
         nflow = self.normalizer.normalize(batch['flow']) if batch.get('flow', None) is not None else None
         nflow = nflow['flow_agentview_image']  # only support agentview flow for now
         batch_size = nactions.shape[0]
-        horizon = nactions.shape[1]
+        T = self.n_action_primitives
         n_obs_steps = self.n_obs_steps
         
         # encode action to latent space
         with torch.no_grad():
-            z = self.action_vq_vae.encode(nactions)
+            if not self.action_pre_encode:
+                z_list = []
+                for i in range(T):
+                    action_steps = nactions[:, i:i+self.horizon, :]
+                    z = self.action_vq_vae.encode(action_steps)
+                    z_list.append(z)
+                z = torch.stack(z_list, dim=1)
 
         global_cond = None
         trajectory = z
@@ -324,7 +343,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             # co-denoise action embedding and obs features
             this_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))
             nobs_features = self.obs_encoder(this_nobs)
-            nobs_features = nobs_features.reshape(batch_size, horizon, -1)
+            nobs_features = nobs_features.reshape(batch_size, T, -1)  # obs steps = action primitives
             cond_data = torch.cat([z, nobs_features], dim=-1)
             trajectory = cond_data.detach()
 
@@ -364,8 +383,9 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             
         # action loss
         with torch.no_grad():
-            predicted_z = predicted_z.permute(0, 2, 1)  # (B, D, T)
+            predicted_z = predicted_z.view(-1, action_emb_dim)
             recon_action = self.action_vq_vae.decode(predicted_z)
+            recon_action = recon_action.view(batch_size, T, -1)
         recon_a_loss = F.mse_loss(recon_action, nactions, reduction='mean')
         
         # flow loss 

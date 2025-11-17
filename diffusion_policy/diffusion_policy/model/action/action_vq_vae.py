@@ -47,7 +47,6 @@ class EncoderMLP(nn.Module):
             layers.append(nn.Linear(down_dims[i-1], down_dims[i]))
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout))
-
         self.encoder = nn.Sequential(*layers)
         self.fc = nn.Linear(down_dims[-1], output_dim)
         self.apply(weights_init_encoder)
@@ -77,11 +76,12 @@ class Encoder1DCNN(nn.Module):
             current_dim = dim
         self.encoder = nn.Sequential(*blocks)
         self.fc = nn.Conv1d(down_dims[-1], output_dim, 1) 
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
         self.apply(weights_init_encoder)
 
     def forward(self, x):
         h = self.encoder(x)
-        state = self.fc(h)
+        state = self.avg_pool(self.fc(h))
         return state
 
         
@@ -96,6 +96,7 @@ class Decoder1DCNN(nn.Module):
         super().__init__()
         blocks = list()
         current_dim = input_dim
+        
         for i, dim in enumerate(up_dims):
             blocks.append(Conv1dBlock(current_dim, dim, kernel_size=kernel_size))
             blocks.append(Upsample1d(dim))
@@ -107,6 +108,7 @@ class Decoder1DCNN(nn.Module):
 
     def forward(self, x):
         # x: (B, input_dim, T_latent)
+        x = einops.repeat(x, 'B D 1 -> B D T', T=4)
         h = self.decoder(x)
         x = self.fc(h)
         return x
@@ -179,7 +181,6 @@ class ActionVqVae(ModuleAttrMixin):
                 # (B, T * A) -> (B, T, A)
                 return einops.rearrange(output, "N (T A) -> N T A", A=self.input_dim_w)
             else:
-                # latent: (B, D, T_latent)
                 output = self.decoder(latent) * self.act_scale
                 # (B, A, T) -> (B, T, A)
                 return output.permute(0, 2, 1)
@@ -200,19 +201,20 @@ class ActionVqVae(ModuleAttrMixin):
         
         if self.use_mlp:
             # state_rep: (B, D)
-            state_rep_flat = state_rep.unsqueeze(1) # (B, 1, D)
+            state_rep = state_rep.unsqueeze(1) # (B, 1, D)
         else:
-            # state_rep: (B, D, T_latent)
-            state_rep_flat = state_rep.permute(0, 2, 1) # (B, T_latent, D)
+            state_rep = state_rep.permute(0, 2, 1)  
 
-        state_vq, _, _ = self.vq_layer(state_rep_flat)
+        state_vq, _, _ = self.vq_layer(state_rep)
+        state_vq = state_vq.squeeze(1)
         
         return state_vq
     
     
     def decode(self, state_vq):
-        if self.use_mlp:
-            state_vq = state_vq.squeeze(1)
+        # state_vq: (B, D)
+        if not self.use_mlp:
+            state_vq = state_vq.unsqueeze(-1)  # (B, D, 1)
         dec_out = self.get_action_from_latent(state_vq) * self.act_scale
         return dec_out
         
@@ -224,18 +226,17 @@ class ActionVqVae(ModuleAttrMixin):
         
         if self.use_mlp:
             # state_rep: (B, D)
-            state_rep_flat = state_rep.unsqueeze(1) # (B, 1, D)
+            state_rep = state_rep.unsqueeze(1) # (B, 1, D)
         else:
-            # state_rep: (B, D, T_latent)
-            state_rep_flat = state_rep.permute(0, 2, 1) # (B, T_latent, D)
+            state_rep = state_rep.permute(0, 2, 1)
 
-        state_rep_flat, vq_code, vq_loss = self.vq_layer(state_rep_flat)
+        state_vq, vq_code, vq_loss = self.vq_layer(state_rep)  # state_vq: (B, 1, D)
         
         if self.use_mlp:
-            state_vq = state_rep_flat.squeeze(1) # (B, D)
+            state_vq = state_vq.squeeze(1)  # (B, D)
         else:
-            state_vq = state_rep_flat.permute(0, 2, 1) # (B, D, T_latent)
-
+            state_vq = state_vq.permute(0, 2, 1)
+        
         dec_out = self.get_action_from_latent(state_vq) * self.act_scale
         return dec_out, vq_loss
     
