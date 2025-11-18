@@ -8,7 +8,7 @@ _target_: diffusion_policy.workspace.train_action_vq_vae_workspace.TrainActionVq
 task_name: ${task.name}
 exp_name: "default"
 
-horizon: 16
+horizon: 32
 n_obs_steps: 2
 n_action_steps: 8
 n_latency_steps: 0
@@ -21,13 +21,14 @@ policy:
   _target_: diffusion_policy.model.action.action_vq_vae.ActionVqVae
   input_dim_h: ${horizon}  # length of action chunk
   input_dim_w: 7  # action dim
-  down_dims: [128]
+  # down_dims: [128]
+  down_dims: null
   n_latent_dims: 512
   vqvae_n_embed: 16
   vqvae_groups: 2
   encoder_loss_multiplier: 1.0
   act_scale: 1.0
-  use_mlp: false
+  use_mlp: true
 
 dataloader:
   batch_size: 2048

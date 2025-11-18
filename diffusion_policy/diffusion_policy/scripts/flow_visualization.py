@@ -15,6 +15,9 @@ from tqdm import tqdm
 from diffusion_policy.common.flow_viz import flow_to_image
 
 
+"""
+python diffusion_policy/scripts/flow_visualization.py -i data/core/coffee_d0.hdf5 -d demo_0 -v agentview_image --save-frames
+"""
 @click.command()
 @click.option('-i', '--input', required=True, help='Input HDF5 file path for observation data.')
 @click.option('-o', '--output', required=False, help='Output video file path (e.g., video.mp4). If not provided, a default name will be generated.')

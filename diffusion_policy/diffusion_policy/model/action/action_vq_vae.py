@@ -36,19 +36,23 @@ class EncoderMLP(nn.Module):
         input_dim,
         output_dim,
         down_dims,
-        dropout=0.4
+        dropout=0.2
     ):
         super(EncoderMLP, self).__init__()
-        layers = []
 
-        layers.append(nn.Linear(input_dim, down_dims[0]))
-        layers.append(nn.ReLU())
-        for i in range(1, len(down_dims)):
-            layers.append(nn.Linear(down_dims[i-1], down_dims[i]))
+        if len(down_dims) == 0:
+            self.encoder = nn.Linear(input_dim, output_dim)
+            self.fc = nn.Identity()
+        else:
+            layers = []
+            layers.append(nn.Linear(input_dim, down_dims[0]))
             layers.append(nn.ReLU())
-            layers.append(nn.Dropout(dropout))
-        self.encoder = nn.Sequential(*layers)
-        self.fc = nn.Linear(down_dims[-1], output_dim)
+            for i in range(1, len(down_dims)):
+                layers.append(nn.Linear(down_dims[i-1], down_dims[i]))
+                layers.append(nn.ReLU())
+                layers.append(nn.Dropout(dropout))
+            self.encoder = nn.Sequential(*layers)
+            self.fc = nn.Linear(down_dims[-1], output_dim)
         self.apply(weights_init_encoder)
 
     def forward(self, x):
@@ -69,13 +73,17 @@ class Encoder1DCNN(nn.Module):
         super(Encoder1DCNN, self).__init__()
         blocks = list()
         current_dim = input_dim
-        for i, dim in enumerate(down_dims):
-            blocks.append(Conv1dBlock(current_dim, dim, kernel_size=kernel_size))
-            blocks.append(Downsample1d(dim))
-            blocks.append(nn.Dropout(dropout))
-            current_dim = dim
-        self.encoder = nn.Sequential(*blocks)
-        self.fc = nn.Conv1d(down_dims[-1], output_dim, 1) 
+        if len(down_dims) == 0:
+            self.encoder = nn.Conv1d(input_dim, output_dim, 1)
+            self.fc = nn.Identity()
+        else:
+            for i, dim in enumerate(down_dims):
+                blocks.append(Conv1dBlock(current_dim, dim, kernel_size=kernel_size))
+                blocks.append(Downsample1d(dim))
+                blocks.append(nn.Dropout(dropout))
+                current_dim = dim
+            self.encoder = nn.Sequential(*blocks)
+            self.fc = nn.Conv1d(down_dims[-1], output_dim, 1) 
         self.avg_pool = nn.AdaptiveAvgPool1d(1)
         self.apply(weights_init_encoder)
 
@@ -91,24 +99,29 @@ class Decoder1DCNN(nn.Module):
                  output_dim, 
                  up_dims, 
                  kernel_size=3,
-                 dropout=0.2
+                 dropout=0.2,
+                 T=8
         ):
         super().__init__()
         blocks = list()
         current_dim = input_dim
-        
-        for i, dim in enumerate(up_dims):
-            blocks.append(Conv1dBlock(current_dim, dim, kernel_size=kernel_size))
-            blocks.append(Upsample1d(dim))
-            blocks.append(nn.Dropout(dropout))
-            current_dim = dim
-        self.decoder = nn.Sequential(*blocks)
-        self.fc = nn.Conv1d(current_dim, output_dim, kernel_size=3, padding=1)
+        self.T = T
+        if len(up_dims) == 0:
+            self.decoder = nn.Identity()
+            self.fc = nn.Conv1d(input_dim, output_dim, kernel_size=3, padding=1)
+        else:
+            for i, dim in enumerate(up_dims):
+                blocks.append(Conv1dBlock(current_dim, dim, kernel_size=kernel_size))
+                blocks.append(Upsample1d(dim))
+                blocks.append(nn.Dropout(dropout))
+                current_dim = dim
+            self.decoder = nn.Sequential(*blocks)
+            self.fc = nn.Conv1d(current_dim, output_dim, kernel_size=3, padding=1)
         self.apply(weights_init_encoder)
 
     def forward(self, x):
         # x: (B, input_dim, T_latent)
-        x = einops.repeat(x, 'B D 1 -> B D T', T=4)
+        x = einops.repeat(x, 'B D 1 -> B D T', T=self.T)
         h = self.decoder(x)
         x = self.fc(h)
         return x
@@ -125,7 +138,7 @@ class ActionVqVae(ModuleAttrMixin):
         vqvae_groups=4,
         encoder_loss_multiplier=1.0,
         act_scale=1.0,
-        use_mlp=False,  #TODO: You should set it to False as mlp is not ready
+        use_mlp=True,  
         dropout=0.2
     ):
         super(ActionVqVae, self).__init__()
@@ -144,8 +157,15 @@ class ActionVqVae(ModuleAttrMixin):
             dim=self.n_latent_dims,
             num_quantizers=discrete_cfg["groups"],
             codebook_size=self.vqvae_n_embed,
+            quantize_dropout=0.4
         )
         self.embedding_dim = self.n_latent_dims
+        
+        if down_dims is None:
+            down_dims = []
+            up_dims = []
+        else:
+            up_dims = list(reversed(down_dims))
 
         if use_mlp:
             input_dim_w = input_dim_h * input_dim_w
@@ -156,7 +176,7 @@ class ActionVqVae(ModuleAttrMixin):
             )
             self.decoder = EncoderMLP(
                 input_dim=n_latent_dims, output_dim=input_dim_w, 
-                down_dims=list(reversed(down_dims)),
+                down_dims=up_dims,
                 dropout=dropout
             )
         else:
@@ -169,8 +189,9 @@ class ActionVqVae(ModuleAttrMixin):
             self.decoder = Decoder1DCNN(
                 input_dim=n_latent_dims,
                 output_dim=input_dim_w,
-                up_dims=list(reversed(down_dims)),
-                dropout=dropout
+                up_dims=up_dims,
+                dropout=dropout,
+                T=input_dim_h // (len(down_dims) + 1)
             )
             
 
@@ -198,6 +219,7 @@ class ActionVqVae(ModuleAttrMixin):
         # state: (B, T, A)
         state = self.preprocess(state / self.act_scale)
         state_rep = self.encoder(state)
+        # return state_rep
         
         if self.use_mlp:
             # state_rep: (B, D)

@@ -151,6 +151,8 @@ class TrainActionVqVaeWorkspace(BaseWorkspace):
                 step_log = dict()
                 # ========= train for this epoch ==========
                 train_losses = list()
+                vq_losses = list()
+                recon_losses = list()
                 with tqdm.tqdm(train_dataloader, desc=f"Training epoch {self.epoch}", 
                         leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                     for batch_idx, batch in enumerate(tepoch):
@@ -174,8 +176,14 @@ class TrainActionVqVaeWorkspace(BaseWorkspace):
                         loss_cpu = loss.item()
                         tepoch.set_postfix(loss=loss_cpu, refresh=False)
                         train_losses.append(loss_cpu)
+                        vq_loss_cpu = raw_loss['vq_loss'].item()
+                        vq_losses.append(vq_loss_cpu)
+                        recon_loss_cpu = raw_loss['recon_loss'].item()
+                        recon_losses.append(recon_loss_cpu)
                         step_log = {
                             'train_loss': loss_cpu,
+                            'vq_loss': vq_loss_cpu,
+                            'recon_loss': recon_loss_cpu,
                             'global_step': self.global_step,
                             'epoch': self.epoch,
                         }
@@ -196,6 +204,10 @@ class TrainActionVqVaeWorkspace(BaseWorkspace):
                 # replace train_loss with epoch average
                 train_loss = np.mean(train_losses)
                 step_log['train_loss'] = train_loss
+                vq_loss = np.mean(vq_losses)
+                step_log['vq_loss'] = vq_loss
+                recon_loss = np.mean(recon_losses)
+                step_log['recon_loss'] = recon_loss
 
                 # ========= eval for this epoch ==========
                 policy = self.model.module if self.local_rank != -1 else self.model

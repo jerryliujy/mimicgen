@@ -14,8 +14,8 @@ pip install -r requirements.txt
 
 python -m pip install git+https://github.com/facebookresearch/sam2.git
 
-cd third_party/pytorch3d_simplified && pip install --no-build-isolation -e . && cd ../..
-# pip install --no-build-isolation "git+https://github.com/facebookresearch/pytorch3d.git"
+pip install --no-build-isolation "git+https://github.com/facebookresearch/pytorch3d.git@stable"
+# PYTORCH3D_NO_NINJA=1 pip install --no-build-isolation "git+https://github.com/facebookresearch/pytorch3d.git@stable" 
 pip install PyOpenGL_accelerate patchelf
 
 sudo apt-get install libegl-dev libglx-mesa0 libglfw3 libosmesa6-dev libgl1-mesa-dev

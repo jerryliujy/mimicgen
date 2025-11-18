@@ -27,8 +27,8 @@ task_name: &task_name coffee_d0
 dataset_type: &dataset_type mimicgen
 dataset_path: &dataset_path
 - "data/core/coffee_d0.hdf5"
-# - "data/core/coffee_d1.hdf5"
-# - "data/core/coffee_d2.hdf5"
+- "data/core/coffee_d1.hdf5"
+- "data/core/coffee_d2.hdf5"
 main_dataset_path: &main_dataset_path data/core/coffee_d0.hdf5
 abs_action: &abs_action False
 
@@ -71,30 +71,30 @@ env_runner:
 #   seed: 42
 #   val_ratio: 0.02
 
-# dataset:
-#   _target_: diffusion_policy.dataset.robomimic_replay_action_dataset.RobomimicReplayActionDataset
-#   shape_meta: *shape_meta
-#   dataset_path: *dataset_path
-#   horizon: ${horizon}
-#   pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
-#   pad_after: ${eval:'${n_action_steps}-1'}
-#   abs_action: *abs_action
-#   rotation_rep: 'rotation_6d'
-#   seed: 42
-#   val_ratio: 0.02
-
 dataset:
-  _target_: diffusion_policy.dataset.robomimic_replay_image_flow_dataset.RobomimicReplayImageFlowDataset
+  _target_: diffusion_policy.dataset.robomimic_replay_action_dataset.RobomimicReplayActionDataset
   shape_meta: *shape_meta
   dataset_path: *dataset_path
   horizon: ${horizon}
-  n_action_primitives: ${n_action_primitives}
   pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
   pad_after: ${eval:'${n_action_steps}-1'}
-  n_obs_steps: ${dataset_obs_steps}
   abs_action: *abs_action
   rotation_rep: 'rotation_6d'
-  use_cache: True
   seed: 42
   val_ratio: 0.02
-  action_pre_encode: ${action_pre_encode}
+
+# dataset:
+#   _target_: diffusion_policy.dataset.robomimic_replay_image_flow_dataset.RobomimicReplayImageFlowDataset
+#   shape_meta: *shape_meta
+#   dataset_path: *dataset_path
+#   horizon: ${horizon}
+#   n_action_primitives: ${n_action_primitives}
+#   pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}
+#   pad_after: ${eval:'${n_action_steps}-1'}
+#   n_obs_steps: ${dataset_obs_steps}
+#   abs_action: *abs_action
+#   rotation_rep: 'rotation_6d'
+#   use_cache: True
+#   seed: 42
+#   val_ratio: 0.02
+#   action_pre_encode: ${action_pre_encode}

@@ -95,7 +95,6 @@ def sliding_window_latents(
     horizon: int,
     stride: int,
     device: torch.device,
-    latent_aggregation: str,
     max_windows: int = None,
 ) -> Tuple[np.ndarray, List[Tuple[int, int]]]:
     latents = []
@@ -111,15 +110,11 @@ def sliding_window_latents(
         for start in range(0, seq_len - horizon + 1, stride):
             window = seq[start:start + horizon].unsqueeze(0).to(device)  # get action of horizon length
             norm_window = action_normalizer.normalize(window)
+            # print(f"norm_window: {norm_window.squeeze(0).detach().cpu().numpy()}")
+            # import time
+            # time.sleep(1)
             with torch.no_grad():
                 latent = model.encode(norm_window).detach()
-            if latent.ndim == 3:
-                if latent_aggregation == "mean":
-                    latent = latent.mean(dim=-1)
-                elif latent_aggregation == "max":
-                    latent = latent.max(dim=-1).values
-                else:  # flatten
-                    latent = latent.reshape(latent.shape[0], -1)
             latents.append(latent.squeeze(0).cpu().numpy())
             metadata.append((demo_idx, start))
             total_windows += 1
@@ -133,8 +128,7 @@ def sliding_window_latents(
 def collect_codebook_vectors(model: ActionVqVae) -> np.ndarray:
     with torch.no_grad():
         codebooks = model.vq_layer.codebooks  # (num_quantizers, codebook_size, dim)
-        flat = codebooks.reshape(-1, codebooks.shape[-1]).cpu().numpy()
-    return flat
+        return [codebooks[i].cpu().numpy() for i in range(codebooks.shape[0])]
 
 
 def reduce_vectors(vectors: np.ndarray, method: str, random_state: int = 0) -> np.ndarray:
@@ -152,25 +146,15 @@ def reduce_vectors(vectors: np.ndarray, method: str, random_state: int = 0) -> n
 def plot_latents(
     latent_2d: np.ndarray,
     metadata: List[Tuple[int, int]],
-    codebook_2d: np.ndarray,
+    codebook_2d_sets: List[np.ndarray],
     output_path: pathlib.Path,
     color_mode: str,
     connect: bool,
 ):
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(10, 8))
     latent_count = latent_2d.shape[0]
 
-    if color_mode == "time":
-        colors = np.linspace(0, 1, latent_count)
-        scatter = plt.scatter(latent_2d[:, 0], latent_2d[:, 1], c=colors, cmap="plasma", s=12, alpha=0.8, label="Encoded actions")
-        cbar = plt.colorbar(scatter)
-        cbar.set_label("Temporal progression")
-    else:  # per demo
-        demo_ids = np.array([m[0] for m in metadata])
-        scatter = plt.scatter(latent_2d[:, 0], latent_2d[:, 1], c=demo_ids, cmap="tab20", s=12, alpha=0.8, label="Encoded actions")
-        cbar = plt.colorbar(scatter)
-        cbar.set_label("Demo index")
-
+    # draw connecting trajectories first so points stay on top
     if connect:
         demo_to_points = {}
         for idx, (demo_idx, _) in enumerate(metadata):
@@ -184,16 +168,50 @@ def plot_latents(
                 alpha=0.4,
             )
 
-    if codebook_2d is not None and len(codebook_2d) > 0:
-        plt.scatter(
-            codebook_2d[:, 0],
-            codebook_2d[:, 1],
-            c="black",
-            marker="x",
-            s=40,
-            label="Codebook entries",
-            alpha=0.7,
+    if color_mode == "time":
+        colors = np.linspace(0, 1, latent_count)
+        scatter = plt.scatter(
+            latent_2d[:, 0],
+            latent_2d[:, 1],
+            c=colors,
+            cmap="plasma",
+            s=12,
+            alpha=0.8,
+            label="Encoded actions",
+            zorder=3,
         )
+        cbar = plt.colorbar(scatter)
+        cbar.set_label("Temporal progression")
+    else:
+        demo_ids = np.array([m[0] for m in metadata])
+        scatter = plt.scatter(
+            latent_2d[:, 0],
+            latent_2d[:, 1],
+            c=demo_ids,
+            cmap="tab20",
+            s=12,
+            alpha=0.8,
+            label="Encoded actions",
+            zorder=3,
+        )
+        cbar = plt.colorbar(scatter)
+        cbar.set_label("Demo index")
+
+    if codebook_2d_sets is not None and len(codebook_2d_sets) > 0:
+        colors = plt.cm.get_cmap("Set1", len(codebook_2d_sets))
+        markers = ["x", "+", "1", "2"]
+        sizes = [80, 60, 40, 30]
+        for i, codebook_set in enumerate(codebook_2d_sets):
+            plt.scatter(
+                codebook_set[:, 0],
+                codebook_set[:, 1],
+                c=[colors(i)],
+                marker=markers[i % len(markers)],
+                s=sizes[i % len(sizes)],
+                label=f"Codebook Layer {i+1}",
+                alpha=0.9,
+                linewidths=1.5,
+            )
 
     plt.title("Action VQ-VAE latent trajectory")
     plt.xlabel("Component 1")
@@ -209,10 +227,10 @@ python diffusion_policy/scripts/visualize_action_vq_vae.py \
   --checkpoint data/checkpoints/mlp/latest.ckpt \
   --output data/media/latents/coffee_demo0.png \
   --demo-idx 0 \
-  --stride 2 \
+  --stride 1 \
   --reducer tsne \
   --latent-aggregation flatten \
-  --connect-trajectories
+  --connect-trajectories 
 """
 def main():
     parser = argparse.ArgumentParser(description="Visualize Action VQ-VAE latent space over dataset demos.")
@@ -224,7 +242,6 @@ def main():
     parser.add_argument("--stride", type=int, default=1, help="Sliding window stride over actions.")
     parser.add_argument("--max-windows", type=int, default=20000, help="Maximum number of windows to encode (to limit runtime).")
     parser.add_argument("--reducer", choices=["pca", "tsne"], default="pca", help="Dimensionality reduction method.")
-    parser.add_argument("--latent-aggregation", choices=["flatten", "mean", "max"], default="flatten", help="How to collapse non-MLP latents with temporal dimension.")
     parser.add_argument("--color-mode", choices=["time", "demo"], default="time", help="Coloring scheme for scatter plot.")
     parser.add_argument("--connect-trajectories", action="store_true", help="Draw lines connecting latent points per demo.")
     parser.add_argument("--random-seed", type=int, default=0, help="Random seed for dimensionality reduction (TSNE).")
@@ -259,26 +276,39 @@ def main():
         horizon=model.input_dim_h,
         stride=args.stride,
         device=device,
-        latent_aggregation=args.latent_aggregation,
         max_windows=args.max_windows,
     )
     print(f"Collected {latents.shape[0]} latent points")
-
+    dump_path = pathlib.Path("data/media/latents/latent_points.txt")
+    dump_path.parent.mkdir(parents=True, exist_ok=True)
+    flat_latents = latents.reshape(latents.shape[0], -1)
+    np.savetxt(dump_path, flat_latents, fmt="%.6f")
+    print(f"Saved latent tensor with shape {flat_latents.shape} to {dump_path}")
+    
     print("Collecting codebook vectors...")
-    codebook_vectors = collect_codebook_vectors(model)
+    codebook_vectors_sets = collect_codebook_vectors(model)
+    vector_counts = [cv.shape[0] for cv in codebook_vectors_sets]
+    print(f"Collected {len(vector_counts)} codebook layers with counts: {vector_counts}")
 
     print(f"Running {args.reducer.upper()} for dimensionality reduction...")
-    combined = np.concatenate([latents, codebook_vectors], axis=0)
-    reduced = reduce_vectors(combined, method=args.reducer, random_state=args.random_seed)
+    all_vectors_flat = np.concatenate([latents] + codebook_vectors_sets, axis=0)
+    reduced = reduce_vectors(
+        all_vectors_flat, method=args.reducer, random_state=args.random_seed
+    )
+
     latent_2d = reduced[: latents.shape[0]]
-    codebook_2d = reduced[latents.shape[0] :]
+    codebook_2d_sets = []
+    current_idx = latents.shape[0]
+    for count in vector_counts:
+        codebook_2d_sets.append(reduced[current_idx:current_idx+count])
+        current_idx += count
 
     output_path = pathlib.Path(args.output)
     print(f"Saving plot to {output_path}")
     plot_latents(
         latent_2d=latent_2d,
         metadata=metadata,
-        codebook_2d=codebook_2d,
+        codebook_2d_sets=codebook_2d_sets,
         output_path=output_path,
         color_mode=args.color_mode,
         connect=args.connect_trajectories,
