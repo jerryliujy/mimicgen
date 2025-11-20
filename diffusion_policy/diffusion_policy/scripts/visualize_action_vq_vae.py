@@ -1,12 +1,19 @@
 #!/usr/bin/env python
 """Visualize Action VQ-VAE latent / codebook trajectories over dataset demos."""
+if __name__ == "__main__":
+    import sys
+    import os
+    import pathlib
+
+    ROOT_DIR = str(pathlib.Path(__file__).parent.parent.parent)
+    sys.path.append(ROOT_DIR)
 
 import argparse
 import copy
 import os
 import pathlib
 import sys
-from typing import List, Sequence, Tuple
+from typing import List, Sequence, Tuple, Optional
 
 import matplotlib
 matplotlib.use("Agg")
@@ -17,17 +24,11 @@ from omegaconf import OmegaConf
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from tqdm import tqdm
+import imageio
 
-# Ensure repo root is on sys.path so hydra target strings work when script is run directly
-ROOT_DIR = pathlib.Path(__file__).resolve().parents[2]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.append(str(ROOT_DIR))
-os.chdir(ROOT_DIR)
 
 import hydra
-from diffusion_policy.dataset.robomimic_replay_action_dataset import (
-    RobomimicReplayActionDataset,
-)
+from diffusion_policy.dataset.robomimic_replay_image_dataset import RobomimicReplayImageDataset
 from diffusion_policy.model.action.action_vq_vae import ActionVqVae
 
 
@@ -55,37 +56,58 @@ def load_model_from_checkpoint(checkpoint_path: str, device: torch.device) -> Tu
     return model, cfg
 
 
-def build_action_dataset(cfg: OmegaConf, horizon: int) -> RobomimicReplayActionDataset:
+def build_action_image_dataset(cfg: OmegaConf, horizon: int) -> RobomimicReplayImageDataset:
     dataset_cfg = cfg.task.dataset
-    dataset_paths = list(dataset_cfg.dataset_path)
+    dataset_paths_cfg = dataset_cfg.dataset_path
+    if isinstance(dataset_paths_cfg, str):
+        dataset_paths = [dataset_paths_cfg]
+    else:
+        dataset_paths = list(dataset_paths_cfg)
+
     rotation_rep = getattr(dataset_cfg, "rotation_rep", "rotation_6d")
-    val_ratio = getattr(dataset_cfg, "val_ratio", 0.0)
     seed = getattr(dataset_cfg, "seed", 42)
 
-    action_dataset = RobomimicReplayActionDataset(
+    n_obs_steps = getattr(dataset_cfg, "n_obs_steps", None)
+    n_obs_steps = int(n_obs_steps) if n_obs_steps is not None else None
+
+    pad_before = int(getattr(dataset_cfg, "pad_before", 0))
+    pad_after = int(getattr(dataset_cfg, "pad_after", 0))
+    abs_action = bool(getattr(dataset_cfg, "abs_action", False))
+
+    action_dataset = RobomimicReplayImageDataset(
         shape_meta=copy.deepcopy(cfg.task.shape_meta),
         dataset_path=dataset_paths,
         horizon=horizon,
-        pad_before=int(dataset_cfg.pad_before),
-        pad_after=int(dataset_cfg.pad_after),
-        abs_action=bool(dataset_cfg.abs_action),
+        pad_before=pad_before,
+        pad_after=pad_after,
+        n_obs_steps=n_obs_steps,
+        abs_action=abs_action,
         rotation_rep=rotation_rep,
-        seed=int(seed),
-        val_ratio=float(val_ratio),
+        use_cache=True,
+        seed=int(seed)
     )
     return action_dataset
 
 
-def extract_demo_sequences(dataset: RobomimicReplayActionDataset, demo_indices: Sequence[int]) -> List[torch.Tensor]:
-    actions = dataset.actions_in_memory # (total_steps, action_dim)
-    episode_starts = dataset.sampler.episode_starts
-    episode_ends = dataset.sampler.episode_ends
-    sequences = []
+def extract_demo_sequences(
+    dataset: RobomimicReplayImageDataset,
+    demo_indices: Sequence[int],
+    image_key: Optional[str] = None,
+) -> Tuple[List[torch.Tensor], List[Optional[np.ndarray]]]:
+    sequences: List[torch.Tensor] = []
+    image_sequences: List[Optional[np.ndarray]] = []
+
     for episode_idx in demo_indices:
-        start_idx = int(episode_starts[episode_idx])
-        end_idx = int(episode_ends[episode_idx])
-        sequences.append(actions[start_idx:end_idx].clone())
-    return sequences
+        episode_data = dataset.replay_buffer.get_episode(episode_idx, copy=True)
+        actions_np = episode_data["action"].astype(np.float32)
+        sequences.append(torch.from_numpy(actions_np))
+
+        if image_key is not None and image_key in episode_data:
+            image_sequences.append(episode_data[image_key])
+        else:
+            image_sequences.append(None)
+
+    return sequences, image_sequences
 
 
 def sliding_window_latents(
@@ -96,6 +118,7 @@ def sliding_window_latents(
     stride: int,
     device: torch.device,
     max_windows: int = None,
+    demo_ids: Sequence[int] = None,
 ) -> Tuple[np.ndarray, List[Tuple[int, int]]]:
     latents = []
     metadata = []  # (demo_idx, window_start)
@@ -104,6 +127,7 @@ def sliding_window_latents(
     action_normalizer = normalizer["action"].to(device)
     iterator = enumerate(tqdm(sequences, desc="Encoding demos")) if len(sequences) > 1 else enumerate(sequences)
     for demo_idx, seq in iterator:
+        resolved_demo = demo_ids[demo_idx]
         seq_len = seq.shape[0]
         if seq_len < horizon:
             continue
@@ -116,7 +140,7 @@ def sliding_window_latents(
             with torch.no_grad():
                 latent = model.encode(norm_window).detach()
             latents.append(latent.squeeze(0).cpu().numpy())
-            metadata.append((demo_idx, start))
+            metadata.append((resolved_demo, start))
             total_windows += 1
             if max_windows is not None and total_windows >= max_windows:
                 return np.stack(latents), metadata
@@ -221,6 +245,77 @@ def plot_latents(
     plt.tight_layout()
     plt.savefig(output_path, dpi=300)
     plt.close()
+    
+    
+def _render_image(ax, image: np.ndarray, title: Optional[str] = None):
+    ax.axis("off")
+    if isinstance(image, torch.Tensor):
+        image = image.detach().cpu().numpy()
+    img = np.asarray(image)
+    if img.ndim == 3 and img.shape[0] in (1, 3) and img.shape[-1] not in (1, 3):
+        # convert channel-first tensors to channel-last for Matplotlib
+        img = np.moveaxis(img, 0, -1)
+
+    if img.dtype == np.uint8:
+        disp_img = img
+    else:
+        max_val = np.max(img)
+        if max_val > 1.0:
+            disp_img = np.clip(img, 0.0, 255.0) / 255.0
+        else:
+            disp_img = np.clip(img, 0.0, 1.0)
+
+    ax.imshow(disp_img)
+    if title:
+        ax.set_title(title)
+
+
+def render_action_latent_video(
+    images: np.ndarray,
+    horizon: int,
+    latent_coords: np.ndarray,
+    latent_steps: List[int],
+    output_path: pathlib.Path,
+    fps: int = 6,
+):
+    if len(latent_coords) == 0:
+        raise RuntimeError("No latent coordinates available for the requested demo.")
+    if images is None:
+        raise RuntimeError("Image data required for video rendering.")
+
+    images_np = np.asarray(images)
+    total_steps = images_np.shape[0]
+    if total_steps == 0:
+        raise RuntimeError("Empty image sequence provided for video rendering.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with imageio.get_writer(output_path, fps=fps) as writer:
+        for idx, (coord, step) in enumerate(zip(latent_coords, latent_steps)):
+            future_idx = step + horizon
+            if future_idx >= total_steps:
+                continue
+
+            fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+            _render_image(axes[0], images_np[step], title=f"Obs t={step}")
+
+            axes[1].scatter(latent_coords[:, 0], latent_coords[:, 1], c="lightgray", s=10, alpha=0.4, label="trajectory")
+            if idx > 0:
+                axes[1].plot(latent_coords[: idx + 1, 0], latent_coords[: idx + 1, 1], color="#1f77b4", linewidth=1.0, alpha=0.7)
+            axes[1].scatter(coord[0], coord[1], c="crimson", s=40, label="current")
+            axes[1].set_title("Latent position")
+            axes[1].set_xlabel("Comp 1")
+            axes[1].set_ylabel("Comp 2")
+            axes[1].set_aspect("equal")
+
+            _render_image(axes[2], images_np[future_idx], title=f"Obs t+H={future_idx}")
+
+            plt.suptitle(f"Frame {idx} | step {step}")
+            fig.tight_layout()
+            fig.canvas.draw()
+            frame = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            writer.append_data(frame)
+            plt.close(fig)
 
 """
 python diffusion_policy/scripts/visualize_action_vq_vae.py \
@@ -245,6 +340,9 @@ def main():
     parser.add_argument("--color-mode", choices=["time", "demo"], default="time", help="Coloring scheme for scatter plot.")
     parser.add_argument("--connect-trajectories", action="store_true", help="Draw lines connecting latent points per demo.")
     parser.add_argument("--random-seed", type=int, default=0, help="Random seed for dimensionality reduction (TSNE).")
+    parser.add_argument("--video-output", type=str, default=None, help="Optional path to save latent-action video animation.")
+    parser.add_argument("--video-demo-idx", type=int, default=None, help="Demo index to render video for (defaults to --demo-idx).")
+    parser.add_argument("--video-fps", type=int, default=6, help="Frames per second for latent-action video.")
     args = parser.parse_args()
 
     device = _resolve_device(args.device)
@@ -253,7 +351,7 @@ def main():
     model, cfg = load_model_from_checkpoint(args.checkpoint, device)
 
     print("Building lightweight action dataset to stream demos...")
-    dataset = build_action_dataset(cfg, horizon=model.input_dim_h)
+    dataset = build_action_image_dataset(cfg, horizon=model.input_dim_h)
     normalizer = dataset.get_normalizer()
     normalizer.to(device)
 
@@ -266,39 +364,50 @@ def main():
             demo_indices = demo_indices[:args.max_demos]
     print(f"Using {len(demo_indices)} demos (out of {n_episodes}).")
 
-    sequences = extract_demo_sequences(dataset, demo_indices)
+    primary_rgb_key = dataset.rgb_keys[0] if len(dataset.rgb_keys) > 0 else None
+    action_sequences, image_sequences = extract_demo_sequences(
+        dataset,
+        demo_indices,
+        image_key=primary_rgb_key,
+    )
+    demo_records = {
+        idx: {"actions": action_seq, "images": image_seq}
+        for idx, action_seq, image_seq in zip(demo_indices, action_sequences, image_sequences)
+    }
 
     print("Encoding sliding windows...")
     latents, metadata = sliding_window_latents(
         model=model,
         normalizer=normalizer,
-        sequences=sequences,
+        sequences=action_sequences,
         horizon=model.input_dim_h,
         stride=args.stride,
         device=device,
         max_windows=args.max_windows,
+        demo_ids=demo_indices,
     )
     print(f"Collected {latents.shape[0]} latent points")
     dump_path = pathlib.Path("data/media/latents/latent_points.txt")
     dump_path.parent.mkdir(parents=True, exist_ok=True)
-    flat_latents = latents.reshape(latents.shape[0], -1)
-    np.savetxt(dump_path, flat_latents, fmt="%.6f")
-    print(f"Saved latent tensor with shape {flat_latents.shape} to {dump_path}")
+    latents_flat = latents.reshape(latents.shape[0], -1)
+    np.savetxt(dump_path, latents_flat, fmt="%.6f")
+    print(f"Saved latent tensor with shape {latents_flat.shape} to {dump_path}")
     
     print("Collecting codebook vectors...")
     codebook_vectors_sets = collect_codebook_vectors(model)
-    vector_counts = [cv.shape[0] for cv in codebook_vectors_sets]
+    codebook_vectors_flat = [cv.reshape(cv.shape[0], -1) for cv in codebook_vectors_sets]
+    vector_counts = [cv.shape[0] for cv in codebook_vectors_flat]
     print(f"Collected {len(vector_counts)} codebook layers with counts: {vector_counts}")
 
     print(f"Running {args.reducer.upper()} for dimensionality reduction...")
-    all_vectors_flat = np.concatenate([latents] + codebook_vectors_sets, axis=0)
+    all_vectors_flat = np.concatenate([latents_flat] + codebook_vectors_flat, axis=0)
     reduced = reduce_vectors(
         all_vectors_flat, method=args.reducer, random_state=args.random_seed
     )
 
-    latent_2d = reduced[: latents.shape[0]]
+    latent_2d = reduced[: latents_flat.shape[0]]
     codebook_2d_sets = []
-    current_idx = latents.shape[0]
+    current_idx = latents_flat.shape[0]
     for count in vector_counts:
         codebook_2d_sets.append(reduced[current_idx:current_idx+count])
         current_idx += count
@@ -313,6 +422,33 @@ def main():
         color_mode=args.color_mode,
         connect=args.connect_trajectories,
     )
+
+    if args.video_output is not None:
+        video_demo_idx = args.video_demo_idx if args.video_demo_idx is not None else args.demo_idx
+        if video_demo_idx is None:
+            raise ValueError("Video rendering requires --video-demo-idx or --demo-idx to be specified.")
+        if video_demo_idx not in demo_records:
+            raise ValueError(f"Demo index {video_demo_idx} was not part of the processed set {demo_indices}.")
+
+        demo_latent_indices = [i for i, (demo_id, _) in enumerate(metadata) if demo_id == video_demo_idx]
+        if len(demo_latent_indices) == 0:
+            raise RuntimeError(f"No latent windows recorded for demo {video_demo_idx}.")
+
+        demo_latent_coords = latent_2d[demo_latent_indices]
+        demo_latent_steps = [metadata[i][1] for i in demo_latent_indices]
+        video_path = pathlib.Path(args.video_output)
+        print(f"Rendering latent-action video for demo {video_demo_idx} to {video_path}")
+        demo_record = demo_records[video_demo_idx]
+        if demo_record["images"] is None:
+            raise RuntimeError("Video rendering requested but no RGB observations are available in the dataset.")
+        render_action_latent_video(
+            images=demo_record["images"],
+            horizon=model.input_dim_h,
+            latent_coords=demo_latent_coords,
+            latent_steps=demo_latent_steps,
+            output_path=video_path,
+            fps=args.video_fps,
+        )
 
     print("Done.")
 
