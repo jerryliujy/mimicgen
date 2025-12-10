@@ -190,6 +190,9 @@ class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
                 step_log = dict()
                 # ========= train for this epoch ==========
                 train_losses = list()
+                train_diffusion_losses = list()
+                train_recon_action_losses = list()
+                train_recon_flow_losses = list()
                 with tqdm.tqdm(train_dataloader, desc=f"Training epoch {self.epoch}", 
                         leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                     for batch_idx, batch in enumerate(tepoch):
@@ -203,8 +206,8 @@ class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
                             raw_loss = self.model.module.compute_loss(batch)
                         else:
                             raw_loss = self.model.compute_loss(batch)
-                        raw_loss = raw_loss['total_loss']
-                        loss = raw_loss / cfg.training.gradient_accumulate_every
+                        total_loss = raw_loss['total_loss']
+                        loss = total_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 
                         # step optimizer
@@ -218,11 +221,20 @@ class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
                             ema.step(self.model.module if self.local_rank != -1 else self.model)
 
                         # logging
-                        raw_loss_cpu = raw_loss.item()
-                        tepoch.set_postfix(loss=raw_loss_cpu, refresh=False)
-                        train_losses.append(raw_loss_cpu)
+                        diffusion_loss = raw_loss['diffusion_loss'].item()
+                        recon_action_loss = raw_loss['recon_action_loss'].item()
+                        # recon_flow_loss = raw_loss['recon_flow_loss'].item()
+                        total_loss_cpu = total_loss.item()
+                        tepoch.set_postfix(loss=total_loss_cpu, refresh=False)
+                        train_losses.append(total_loss_cpu)
+                        train_diffusion_losses.append(diffusion_loss)
+                        train_recon_action_losses.append(recon_action_loss)
+                        # train_recon_flow_losses.append(recon_flow_loss)
                         step_log = {
-                            'train_loss': raw_loss_cpu,
+                            'train_loss': total_loss_cpu,
+                            'diffusion_loss': diffusion_loss,
+                            'recon_action_loss': recon_action_loss,
+                            # 'recon_flow_loss': recon_flow_loss,
                             'global_step': self.global_step,
                             'epoch': self.epoch,
                             'lr': lr_scheduler.get_last_lr()[0]
@@ -244,6 +256,9 @@ class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
                 # replace train_loss with epoch average
                 train_loss = np.mean(train_losses)
                 step_log['train_loss'] = train_loss
+                step_log['diffusion_loss'] = np.mean(train_diffusion_losses)
+                step_log['recon_action_loss'] = np.mean(train_recon_action_losses)
+                # step_log['recon_flow_loss'] = np.mean(train_recon_flow_losses)
 
                 # ========= eval for this epoch ==========
                 policy = self.model.module if self.local_rank != -1 else self.model
@@ -260,7 +275,8 @@ class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
                 # run validation
                 if (self.epoch % cfg.training.val_every) == 0:
                     with torch.no_grad():
-                        val_losses = list()
+                        val_sums = dict()
+                        val_count = 0
                         with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}", 
                                 leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                             for batch_idx, batch in enumerate(tepoch):
@@ -269,14 +285,17 @@ class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
                                     loss = self.model.module.compute_loss(batch)
                                 else:
                                     loss = self.model.compute_loss(batch)
-                                val_losses.append(loss)
+                                val_count += 1
+                                for k, v in loss.items():
+                                    val_sums[k] = val_sums.get(k, 0.0) + v.item()
                                 if (cfg.training.max_val_steps is not None) \
                                     and batch_idx >= (cfg.training.max_val_steps-1):
                                     break
-                        if len(val_losses) > 0:
-                            val_loss = torch.mean(torch.tensor(val_losses)).item()
-                            # log epoch average validation loss
-                            step_log['val_loss'] = val_loss
+                        if val_count > 0:
+                            for k, v in val_sums.items():
+                                step_log[f"val_{k}"] = v / val_count
+                            if 'total_loss' in val_sums:
+                                step_log['val_loss'] = val_sums['total_loss'] / val_count
 
                 # run diffusion sampling on a training batch
                 if (self.epoch % cfg.training.sample_every) == 0:
@@ -359,7 +378,7 @@ class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")), 
     config_name=pathlib.Path(__file__).stem)
 def main(cfg):
-    workspace = TrainDiffusionUnetHybridWorkspace(cfg)
+    workspace = TrainDiffusionUnetFlowauxHybridWorkspace(cfg)
     workspace.run()
 
 if __name__ == "__main__":

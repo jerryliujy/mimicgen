@@ -14,7 +14,6 @@ from hydra.utils import get_original_cwd
 from omegaconf import OmegaConf
 import pathlib
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
-from diffusion_policy.dataset.robomimic_replay_image_dataset import RobomimicReplayImageDataset
 
 import os
 import torch

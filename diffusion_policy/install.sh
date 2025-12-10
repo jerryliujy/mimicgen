@@ -10,6 +10,7 @@ source .venv/bin/activate
 pip install --upgrade pip setuptools wheel
 
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install setuptools==65.5.0 pip==21
 pip install -r requirements.txt
 
 python -m pip install git+https://github.com/facebookresearch/sam2.git

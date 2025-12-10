@@ -58,7 +58,7 @@ google-auth==2.40.2
 googleapis-common-protos==1.70.0
 gpustat==1.1.1
 grpcio==1.71.0
-gym
+gym==0.21.0
 h5py==3.7.0
 hf-xet==1.1.10
 huggingface-hub==0.25.2

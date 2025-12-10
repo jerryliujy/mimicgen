@@ -34,7 +34,7 @@ from diffusion_policy.common.normalize_util import (
 register_codecs()
 
 
-def get_cache_path(dataset_path, flow_dataset_path=None):
+def get_cache_path(dataset_path, flow_dataset_path=None, max_demos=None):
     """
     Generates cache paths for base data and flow data.
     The base cache hash is based on the main dataset path.
@@ -47,7 +47,10 @@ def get_cache_path(dataset_path, flow_dataset_path=None):
         dataset_paths = list(dataset_path)
     
     dataset_paths.sort()
-    path_str = json.dumps(dataset_paths)
+    if max_demos is not None:
+        path_str = json.dumps({'paths': dataset_paths, 'max_demos': max_demos})
+    else:
+        path_str = json.dumps({'paths': dataset_paths})
     base_path_hash = hashlib.md5(path_str.encode('utf-8')).hexdigest()
     
     cache_dir = os.path.dirname(dataset_paths[0])
@@ -62,7 +65,10 @@ def get_cache_path(dataset_path, flow_dataset_path=None):
         
         flow_dataset_paths.sort()
         # Hash includes both base and flow paths
-        flow_path_str = json.dumps(dataset_paths + flow_dataset_paths)
+        if max_demos is not None:
+            flow_path_str = json.dumps({'paths': dataset_paths + flow_dataset_paths, 'max_demos': max_demos})
+        else:
+            flow_path_str = json.dumps({'paths': dataset_paths + flow_dataset_paths})
         flow_path_hash = hashlib.md5(flow_path_str.encode('utf-8')).hexdigest()
         flow_cache_path = os.path.join(cache_dir, f"cache_flow_{flow_path_hash}.zarr.zip")
 
@@ -84,6 +90,7 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
             seed=42,
             val_ratio=0.0,
             action_pre_encode=True,
+            max_demos=None,
             **kwargs
         ):
         super().__init__()
@@ -99,7 +106,7 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
             flow_dataset_paths = [str(pathlib.Path(p).parent.joinpath(pathlib.Path(p).stem + '_flow' + pathlib.Path(p).suffix)) for p in dataset_path]
 
         if use_cache:
-            base_cache_path, flow_cache_path = get_cache_path(dataset_path, flow_dataset_paths)
+            base_cache_path, flow_cache_path = get_cache_path(dataset_path, flow_dataset_paths, max_demos=max_demos)
             
             # Load or create base cache (obs, action)
             base_cache_lock_path = base_cache_path + '.lock'
@@ -107,11 +114,12 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
             with FileLock(base_cache_lock_path):
                 if not os.path.exists(base_cache_path):
                     print('Base cache does not exist. Creating!')
-                    replay_buffer = _convert_base_to_replay(
+                    replay_buffer, _, _ = _convert_base_to_replay(
                         shape_meta=shape_meta,
                         dataset_path=dataset_path,
                         abs_action=abs_action,
-                        rotation_transformer=rotation_transformer
+                        rotation_transformer=rotation_transformer,
+                        max_demos=max_demos
                     )
                     print('Saving base cache to disk.')
                     with zarr.ZipStore(base_cache_path, mode='w') as zip_store:
@@ -123,45 +131,48 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
                     print('Loaded base cache!')
 
             # Load or create flow cache
-            if flow_cache_path and shape_meta.get('flow') is not None:
-                flow_cache_lock_path = flow_cache_path + '.lock'
-                print('Acquiring lock on flow cache.')
-                with FileLock(flow_cache_lock_path):
-                    if not os.path.exists(flow_cache_path):
-                        print('Flow cache does not exist. Creating!')
-                        # Create a temporary buffer for flow data
-                        flow_replay_buffer = _convert_flow_to_replay(
-                            shape_meta=shape_meta,
-                            flow_dataset_path=flow_dataset_paths
-                        )
-                        print('Saving flow cache to disk.')
-                        with zarr.ZipStore(flow_cache_path, mode='w') as zip_store:
-                            flow_replay_buffer.save_to_store(store=zip_store)
-                        # Merge flow data into the main replay buffer
-                        for key, value in flow_replay_buffer.items():
-                            replay_buffer.data.update({key: value})
-                    else:
-                        print('Loading cached flow data from Disk.')
-                        with zarr.ZipStore(flow_cache_path, mode='r') as zip_store:
-                            temp_rb = ReplayBuffer.copy_from_store(src_store=zip_store, store=zarr.MemoryStore())
-                            for key, value in temp_rb.items():
-                                replay_buffer.data.update({key: value})
-                        print('Loaded flow cache!')
+            # if flow_cache_path and shape_meta.get('flow') is not None:
+            #     flow_cache_lock_path = flow_cache_path + '.lock'
+            #     print('Acquiring lock on flow cache.')
+            #     with FileLock(flow_cache_lock_path):
+            #         if not os.path.exists(flow_cache_path):
+            #             print('Flow cache does not exist. Creating!')
+            #             # Create a temporary buffer for flow data
+            #             flow_replay_buffer = _convert_flow_to_replay(
+            #                 shape_meta=shape_meta,
+            #                 flow_dataset_path=flow_dataset_paths,
+            #                 max_demos=max_demos
+            #             )
+            #             print('Saving flow cache to disk.')
+            #             with zarr.ZipStore(flow_cache_path, mode='w') as zip_store:
+            #                 flow_replay_buffer.save_to_store(store=zip_store)
+            #             # Merge flow data into the main replay buffer
+            #             for key, value in flow_replay_buffer.items():
+            #                 replay_buffer.data.update({key: value})
+            #         else:
+            #             print('Loading cached flow data from Disk.')
+            #             with zarr.ZipStore(flow_cache_path, mode='r') as zip_store:
+            #                 temp_rb = ReplayBuffer.copy_from_store(src_store=zip_store, store=zarr.MemoryStore())
+            #                 for key, value in temp_rb.items():
+            #                     replay_buffer.data.update({key: value})
+            #             print('Loaded flow cache!')
         else:
             # Fallback to old behavior if not using cache
-            replay_buffer = _convert_base_to_replay(
+            replay_buffer, _, _ = _convert_base_to_replay(
                 shape_meta=shape_meta,
                 dataset_path=dataset_path,
                 abs_action=abs_action,
-                rotation_transformer=rotation_transformer
+                rotation_transformer=rotation_transformer,
+                max_demos=max_demos
             )
-            if shape_meta.get('flow') is not None:
-                flow_replay_buffer = _convert_flow_to_replay(
-                    shape_meta=shape_meta,
-                    flow_dataset_path=flow_dataset_paths
-                )
-                for key, value in flow_replay_buffer.items():
-                    replay_buffer.data.update({key: value})
+            # if shape_meta.get('flow') is not None:
+            #     flow_replay_buffer = _convert_flow_to_replay(
+            #         shape_meta=shape_meta,
+            #         flow_dataset_path=flow_dataset_paths,
+            #         max_demos=max_demos
+            #     )
+            #     for key, value in flow_replay_buffer.items():
+            #         replay_buffer.data.update({key: value})
 
         rgb_keys = [key for key, attr in shape_meta['obs'].items() if attr.get('type', 'low_dim') == 'rgb']
         lowdim_keys = [key for key, attr in shape_meta['obs'].items() if attr.get('type', 'low_dim') == 'low_dim']
@@ -185,18 +196,19 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
         self.pad_after = pad_after
         self.action_pre_encode = action_pre_encode
                 
-        if action_pre_encode:
-            normalizer = self.get_normalizer()
-            self._pre_encode_actions(kwargs['action_encoder'], normalizer)
-
         val_mask = get_val_mask(
             n_episodes=replay_buffer.n_episodes, 
             val_ratio=val_ratio,
             seed=seed)
         train_mask = ~val_mask
+
+        if action_pre_encode:
+            normalizer = self.get_normalizer()
+            self._pre_encode_actions(kwargs['action_encoder'], normalizer)
+        
         sampler = SequenceSampler(
             replay_buffer=replay_buffer, 
-            sequence_length=horizon+n_action_primitives-1,
+            sequence_length=n_action_primitives,
             pad_before=pad_before, 
             pad_after=pad_after,
             episode_mask=train_mask,
@@ -205,11 +217,12 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
         self.sampler = sampler
         self.train_mask = train_mask
 
+
     def get_validation_dataset(self):
         val_set = copy.copy(self)
         val_set.sampler = SequenceSampler(
             replay_buffer=self.replay_buffer, 
-            sequence_length=self.horizon,
+            sequence_length=self.n_action_primitives,
             pad_before=self.pad_before, 
             pad_after=self.pad_after,
             episode_mask=~self.train_mask
@@ -248,9 +261,9 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
         for key in self.rgb_keys:
             normalizer[key] = get_image_range_normalizer()
             
-        # flow
-        for key in self.flow_keys:
-            normalizer[f'flow_{key}'] = get_image_range_normalizer()
+        # # flow
+        # for key in self.flow_keys:
+        #     normalizer[f'flow_{key}'] = get_image_range_normalizer()
         
         return normalizer
 
@@ -274,12 +287,12 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
             obs_dict[key] = data[key][to_slice].astype(np.float32)
             del data[key]
         
-        flow_dict = dict()
-        for key in self.flow_keys:
-            flow_key = f'flow_{key}'
-            if flow_key in data:
-                flow_dict[key] = np.moveaxis(data[flow_key][to_slice], -1, 1).astype(np.float32)
-                del data[flow_key]
+        # flow_dict = dict()
+        # for key in self.flow_keys:
+        #     flow_key = f'flow_{key}'
+        #     if flow_key in data:
+        #         flow_dict[key] = np.moveaxis(data[flow_key][to_slice], -1, 1).astype(np.float32)
+        #         del data[flow_key]
         
         torch_data = {
             'obs': dict_apply(obs_dict, torch.from_numpy),
@@ -288,39 +301,82 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
         if self.action_pre_encode:
             torch_data['z'] = torch.from_numpy(data['z'].astype(np.float32))
             
-        if len(flow_dict) > 0:
-            torch_data['flow'] = dict_apply(flow_dict, torch.from_numpy)
+        # if len(flow_dict) > 0:
+        #     torch_data['flow'] = dict_apply(flow_dict, torch.from_numpy)
             
         return torch_data
 
 
-    def _pre_encode_actions(self, action_vq_vae, normalizer):
-        # Ensure VAE is on the correct device and in eval mode
+    def _pre_encode_actions(self, action_vq_vae, normalizer, batch_size=256):
+        """
+        Pre-encode actions with time context using the same sequence length as the sampler
+        (horizon + n_action_primitives - 1). The encoded latent for a sequence is stored at
+        the *start* timestep of that sequence, so a ReplayBuffer lookup followed by the
+        SequenceSampler will return the correct aligned latent windows.
+        """
         device = action_vq_vae.device
         action_vq_vae.eval()
 
-        # Get all actions and normalize them
-        all_actions = torch.from_numpy(self.replay_buffer['action'][:]).to(device)
-        nactions = normalizer['action'].normalize(all_actions)
+        # Build a temporary sampler over only the action key to extract horizon-length windows
+        seq_len = self.horizon
+        action_sampler = SequenceSampler(
+            replay_buffer=self.replay_buffer,
+            sequence_length=seq_len,
+            pad_before=self.pad_before,
+            pad_after=self.pad_after,
+            keys=['action'],
+            # use all episodes for pre-encoding
+            episode_mask=np.ones_like(self.replay_buffer.episode_ends, dtype=bool),
+        )
 
-        # Encode actions in batches to avoid OOM
-        batch_size = 256
-        encoded_actions = []
-        with torch.no_grad():
-            for i in tqdm(range(0, len(nactions), batch_size), desc="Pre-encoding actions"):
-                batch = nactions[i:i+batch_size]
-                # Sliding window encoding
-                z_list = []
-                for j in range(self.n_action_primitives):
-                    action_window = batch[:, j:j+self.horizon]
-                    z = action_vq_vae.encode(action_window)
-                    z_list.append(z.unsqueeze(1))
-                encoded_batch = torch.cat(z_list, dim=1) # (batch_size, n_action_primitives, D_latent)
-                encoded_actions.append(encoded_batch.cpu().numpy())
-        
-        # Replace raw actions with encoded actions in the replay buffer
-        encoded_actions = np.concatenate(encoded_actions, axis=0)
-        self.replay_buffer.data['z'] = encoded_actions
+        # Allocate storage for per-timestep latents; will be filled at sequence start indices
+        latents_store = None
+
+        indices = action_sampler.indices
+        n_samples = len(indices)
+        # Iterate in batches over sequences
+        for start in tqdm(range(0, n_samples, batch_size), desc="Pre-encoding actions"):
+            end = min(start + batch_size, n_samples)
+            batch_indices = indices[start:end]
+
+            # Collect action sequences (B, seq_len, act_dim)
+            seq_batch = []
+            seq_starts = []
+            for bidx in batch_indices:
+                buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx = bidx
+                seq = self.replay_buffer['action'][buffer_start_idx:buffer_end_idx]
+                # Pad if needed (mirror SequenceSampler behaviour)
+                if (sample_start_idx > 0) or (sample_end_idx < seq_len):
+                    padded = np.zeros((seq_len,) + seq.shape[1:], dtype=seq.dtype)
+                    if sample_start_idx > 0:
+                        padded[:sample_start_idx] = seq[0]
+                    if sample_end_idx < seq_len:
+                        padded[sample_end_idx:] = seq[-1]
+                    padded[sample_start_idx:sample_end_idx] = seq
+                    seq = padded
+                seq_batch.append(seq)
+                # Align latent to the sequence start (buffer_start_idx corresponds to first valid step)
+                seq_starts.append(buffer_start_idx)
+
+            seq_batch = torch.from_numpy(np.stack(seq_batch, axis=0)).to(device)  # (B, L, A)
+            norm_batch = normalizer['action'].normalize(seq_batch)
+
+            # Encode a single horizon window per sequence (faster, no n_action_primitives loop)
+            window = norm_batch[:, :self.horizon]              # (B, horizon, A)
+            z_batch = action_vq_vae.encode(window).cpu().numpy()  # (B, latent_dim)
+
+            # Initialize storage lazily once latent dim is known
+            if latents_store is None:
+                latent_dim = z_batch.shape[-1]
+                n_steps_total = self.replay_buffer['action'].shape[0]
+                latents_store = np.zeros((n_steps_total, latent_dim), dtype=np.float32)
+
+            for seq_start, z_seq in zip(seq_starts, z_batch):
+                latents_store[seq_start] = z_seq
+
+        # Persist latents into replay buffer for later sampling
+        if latents_store is not None:
+            self.replay_buffer.data['z'] = latents_store
         
 
 # ==================== Helper Functions ====================
@@ -345,29 +401,41 @@ def _convert_actions(raw_actions, abs_action, rotation_transformer):
     return actions
 
 
-def _get_episode_ends(dataset_paths, load_flow=False, flow_key=None):
+def _get_episode_ends(dataset_paths, load_flow=False, flow_key=None, max_demos=None):
     episode_starts = []
     episode_ends = []
     n_steps = 0
+    demos_loaded = 0
     print(f"Scanning {len(dataset_paths)} files for metadata...")
     for path in tqdm(dataset_paths, desc="Scanning metadata"):
+        print("Demos loaded:", demos_loaded)
+        print("Max demos:", max_demos)
+        if max_demos is not None and demos_loaded >= max_demos:
+            break
         try:
             with h5py.File(path, 'r') as file:
                 if 'data' not in file: 
                     continue
-                for i in range(len(file['data'])):
-                    demo_key = f'demo_{i}'
-                    if demo_key not in file['data']: 
-                        continue
-                    if load_flow:
-                        episode_length = file[f'data/{demo_key}/flow/{flow_key}'].shape[0]
-                    else:
-                        episode_length = file[f'data/{demo_key}/actions'].shape[0]
-                    episode_starts.append(n_steps)
-                    n_steps += episode_length
-                    episode_ends.append(n_steps)
+                
+                demo_keys_in_file = sorted([k for k in file['data'].keys() if k.startswith('demo_')])
+                
+                for demo_key in demo_keys_in_file:
+                    if max_demos is not None and demos_loaded >= max_demos:
+                        break
+
+                    key_path = f'data/{demo_key}/actions'
+                    # if load_flow:
+                    #     key_path = f'data/{demo_key}/flow/{flow_key}'
+
+                    if key_path in file:
+                        episode_length = file[key_path].shape[0]
+                        episode_starts.append(n_steps)
+                        n_steps += episode_length
+                        episode_ends.append(n_steps)
+                        demos_loaded += 1
         except Exception as e:
             print(f"Could not read file {path}: {e}")
+            
     return np.array(episode_starts, dtype=np.int64), np.array(episode_ends, dtype=np.int64), n_steps
 
 def _parallel_load_images(
@@ -379,7 +447,8 @@ def _parallel_load_images(
     data_type, 
     shape_meta, 
     n_workers, 
-    max_inflight_tasks
+    max_inflight_tasks,
+    max_demos: int = None
 ):
     def img_copy(zarr_arr, zarr_idx, file_path, hdf5_key, hdf5_idx):
         try:
@@ -389,15 +458,15 @@ def _parallel_load_images(
             return True, None
         except Exception:
             return False
-            # import traceback
-            # err = traceback.format_exc()
-            # return False, f"[{data_type}] file={file_path}, dataset={hdf5_key}, hdf5_idx={hdf5_idx}, zarr_idx={zarr_idx}\n{err}"
         
     print(f"Steps: {n_steps}, keys: {keys}")
+    max_allowed_demos = len(episode_starts) if max_demos is None else min(len(episode_starts), max_demos)
     with tqdm(total=n_steps * len(keys), desc=f"Loading {data_type} data", mininterval=1.0) as pbar:
         with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
             futures = set()
             for key in keys:
+                if max_allowed_demos == 0:
+                    break
                 zarr_key = f'flow_{key}' if data_type == 'flow' else key
                 shape = tuple(shape_meta[data_type][key]['shape'])
                 c, h, w = shape
@@ -409,42 +478,40 @@ def _parallel_load_images(
                     compressor=compressor,
                     dtype=np.uint8
                 )
-                
-                demo_idx_offset = 0
+
+                global_demo_idx = 0
                 for path in dataset_paths:
+                    if global_demo_idx >= max_allowed_demos:
+                        break
                     if not os.path.exists(path): 
                         continue
                     with h5py.File(path, 'r') as file:
                         if 'data' not in file: 
                             continue
                         
-                        demos = file['data']
-                        for i in range(len(demos)):
-                            demo_key = f'demo_{i}'
-                            if demo_key not in demos: 
-                                continue
+                        demos = [k for k in file['data'].keys() if k.startswith('demo_')]
+                        for demo_key in demos:
+                            if global_demo_idx >= max_allowed_demos:
+                                break
+
                             hdf5_key = f"data/{demo_key}/{data_type}/{key}"
                             if hdf5_key not in file: 
                                 continue
                             
-                            global_demo_idx = demo_idx_offset + i
                             demo_len = file[hdf5_key].shape[0]
                             
                             for hdf5_idx in range(demo_len):
                                 if len(futures) >= max_inflight_tasks:
                                     completed, futures = concurrent.futures.wait(futures, return_when=concurrent.futures.FIRST_COMPLETED)
                                     for f in completed:
-                                        # ok, err = f.result()
-                                        # if not ok:
-                                        #     raise RuntimeError(err)
                                         if not f.result(): 
                                             raise RuntimeError(f'Failed to encode {data_type} data!')
                                     pbar.update(len(completed))
                                 
                                 zarr_idx = episode_starts[global_demo_idx] + hdf5_idx
                                 futures.add(executor.submit(img_copy, img_arr, zarr_idx, path, hdf5_key, hdf5_idx))
-                        demo_idx_offset += len(demos)
-            
+                            global_demo_idx += 1
+
             completed, futures = concurrent.futures.wait(futures)
             for f in completed:
                 if not f.result(): 
@@ -457,7 +524,8 @@ def _convert_base_to_replay(
     abs_action, 
     rotation_transformer, 
     n_workers=None, 
-    max_inflight_tasks=None
+    max_inflight_tasks=None,
+    max_demos=None
 ):
     if n_workers is None: 
         n_workers = multiprocessing.cpu_count()
@@ -472,7 +540,7 @@ def _convert_base_to_replay(
     rgb_keys = [key for key, attr in shape_meta['obs'].items() if attr.get('type', 'low_dim') == 'rgb']
     lowdim_keys = [key for key, attr in shape_meta['obs'].items() if attr.get('type', 'low_dim') == 'low_dim']
 
-    episode_starts, episode_ends, n_steps = _get_episode_ends(dataset_paths)
+    episode_starts, episode_ends, n_steps = _get_episode_ends(dataset_paths, max_demos=max_demos)
     
     store = zarr.MemoryStore()
     root = zarr.group(store=store)
@@ -497,24 +565,22 @@ def _convert_base_to_replay(
             with h5py.File(path, 'r') as file:
                 if 'data' not in file: 
                     continue
-                num_demos_in_file = len(file['data'])
-                for i in range(num_demos_in_file):
-                    demo_key = f'demo_{i}'
-                    if demo_key not in file['data']: 
-                        continue
+                
+                demos_in_file = sorted([k for k in file['data'].keys() if k.startswith('demo_')])
+                for demo_key in demos_in_file:
+                    if max_demos is not None and demo_idx_offset >= max_demos:
+                        break
                     
                     data_chunk = file[f'data/{demo_key}/{data_key}'][:].astype(np.float32)
-                    global_demo_idx = demo_idx_offset + i
-                    start_idx = episode_starts[global_demo_idx]
-                    end_idx = episode_ends[global_demo_idx]
+                    start_idx = episode_starts[demo_idx_offset]
+                    end_idx = episode_ends[demo_idx_offset]
                     
                     if key == 'action':
                         data_chunk = _convert_actions(data_chunk, abs_action, rotation_transformer)
                     this_data_arr[start_idx:end_idx] = data_chunk
-                    
-                demo_idx_offset += num_demos_in_file
+                    demo_idx_offset += 1
 
-    _parallel_load_images(data_group, episode_starts, n_steps, dataset_paths, rgb_keys, 'obs', shape_meta, n_workers, max_inflight_tasks)
+    _parallel_load_images(data_group, episode_starts, n_steps, dataset_paths, rgb_keys, 'obs', shape_meta, n_workers, max_inflight_tasks, max_demos)
     
     replay_buffer = ReplayBuffer(root)
     return replay_buffer, episode_starts, episode_ends
@@ -523,14 +589,22 @@ def _convert_flow_to_replay(
     shape_meta, 
     flow_dataset_path, 
     n_workers=None, 
-    max_inflight_tasks=None
+    max_inflight_tasks=None,
+    max_demos=None
 ):
     if n_workers is None: 
         n_workers = multiprocessing.cpu_count()
     if max_inflight_tasks is None: 
         max_inflight_tasks = n_workers * 5
         
-    episode_starts, episode_ends, n_steps = _get_episode_ends(flow_dataset_paths, load_flow=True, flow_key=flow_keys[0])
+    if isinstance(flow_dataset_path, str):
+        flow_dataset_paths = [flow_dataset_path]
+    else: 
+        flow_dataset_paths = list(flow_dataset_path)
+
+    flow_keys = [key for key, attr in shape_meta.get('flow', {}).items() if attr.get('type', 'rgb') == 'rgb']
+
+    episode_starts, episode_ends, n_steps = _get_episode_ends(flow_dataset_paths, load_flow=True, flow_key=flow_keys[0], max_demos=max_demos)
 
     store = zarr.MemoryStore()
     root = zarr.group(store=store)
@@ -539,15 +613,7 @@ def _convert_flow_to_replay(
     _ = meta_group.array('episode_ends', episode_ends, 
         dtype=np.int64, compressor=None, overwrite=True)
 
-    if isinstance(flow_dataset_path, str):
-        flow_dataset_paths = [flow_dataset_path]
-    else: 
-        flow_dataset_paths = list(flow_dataset_path)
-
-    flow_keys = [key for key, attr in shape_meta.get('flow', {}).items() if attr.get('type', 'rgb') == 'rgb']
-
-    
-    _parallel_load_images(data_group, episode_starts, n_steps, flow_dataset_paths, flow_keys, 'flow', shape_meta, n_workers, max_inflight_tasks)
+    _parallel_load_images(data_group, episode_starts, n_steps, flow_dataset_paths, flow_keys, 'flow', shape_meta, n_workers, max_inflight_tasks, max_demos)
     
     # Return a buffer-like object (a dict is fine) to be merged
     return ReplayBuffer(root)

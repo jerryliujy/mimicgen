@@ -25,10 +25,11 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from tqdm import tqdm
 import imageio
+from PIL import Image
 
 
 import hydra
-from diffusion_policy.dataset.robomimic_replay_image_dataset import RobomimicReplayImageDataset
+from diffusion_policy.dataset.robomimic_replay_image_flow_dataset import RobomimicReplayImageFlowDataset
 from diffusion_policy.model.action.action_vq_vae import ActionVqVae
 
 
@@ -56,41 +57,43 @@ def load_model_from_checkpoint(checkpoint_path: str, device: torch.device) -> Tu
     return model, cfg
 
 
-def build_action_image_dataset(cfg: OmegaConf, horizon: int) -> RobomimicReplayImageDataset:
-    dataset_cfg = cfg.task.dataset
-    dataset_paths_cfg = dataset_cfg.dataset_path
-    if isinstance(dataset_paths_cfg, str):
-        dataset_paths = [dataset_paths_cfg]
-    else:
-        dataset_paths = list(dataset_paths_cfg)
+def build_action_image_dataset(cfg: OmegaConf, horizon: int) -> RobomimicReplayImageFlowDataset:
+    # dataset_cfg = cfg.task.dataset
+    # dataset_paths_cfg = dataset_cfg.dataset_path
+    # if isinstance(dataset_paths_cfg, str):
+    #     dataset_paths = [dataset_paths_cfg]
+    # else:
+    #     dataset_paths = list(dataset_paths_cfg)
+    dataset_paths = ["data/core/coffee_d0.hdf5"]
 
-    rotation_rep = getattr(dataset_cfg, "rotation_rep", "rotation_6d")
-    seed = getattr(dataset_cfg, "seed", 42)
+    rotation_rep = "rotation_6d"
+    seed = 42
 
-    n_obs_steps = getattr(dataset_cfg, "n_obs_steps", None)
-    n_obs_steps = int(n_obs_steps) if n_obs_steps is not None else None
+    n_obs_steps = 2
 
-    pad_before = int(getattr(dataset_cfg, "pad_before", 0))
-    pad_after = int(getattr(dataset_cfg, "pad_after", 0))
-    abs_action = bool(getattr(dataset_cfg, "abs_action", False))
-
-    action_dataset = RobomimicReplayImageDataset(
+    pad_before = 0
+    pad_after = 0
+    abs_action = False
+    action_dataset = RobomimicReplayImageFlowDataset(
         shape_meta=copy.deepcopy(cfg.task.shape_meta),
         dataset_path=dataset_paths,
         horizon=horizon,
+        n_action_primitives=8,
         pad_before=pad_before,
         pad_after=pad_after,
         n_obs_steps=n_obs_steps,
         abs_action=abs_action,
         rotation_rep=rotation_rep,
         use_cache=True,
-        seed=int(seed)
+        seed=int(seed),
+        action_pre_encode=False,
+        max_demos=10
     )
     return action_dataset
 
 
 def extract_demo_sequences(
-    dataset: RobomimicReplayImageDataset,
+    dataset: RobomimicReplayImageFlowDataset,
     demo_indices: Sequence[int],
     image_key: Optional[str] = None,
 ) -> Tuple[List[torch.Tensor], List[Optional[np.ndarray]]]:
@@ -312,20 +315,23 @@ def render_action_latent_video(
             plt.suptitle(f"Frame {idx} | step {step}")
             fig.tight_layout()
             fig.canvas.draw()
-            frame = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-            frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            width, height = fig.canvas.get_width_height()
+            # Use buffer_rgba for compatibility with newer Matplotlib versions
+            buf = fig.canvas.buffer_rgba()
+            img = Image.frombuffer("RGBA", (width, height), buf)
+            img = img.convert("RGB")
+            frame = np.array(img) 
             writer.append_data(frame)
             plt.close(fig)
 
 """
 python diffusion_policy/scripts/visualize_action_vq_vae.py \
-  --checkpoint data/checkpoints/mlp/latest.ckpt \
+  --checkpoint data/checkpoints/mlp3/latest.ckpt \
   --output data/media/latents/coffee_demo0.png \
   --demo-idx 0 \
   --stride 1 \
   --reducer tsne \
-  --latent-aggregation flatten \
-  --connect-trajectories 
+  --video-output data/media/latents/coffee_demo0.mp4 
 """
 def main():
     parser = argparse.ArgumentParser(description="Visualize Action VQ-VAE latent space over dataset demos.")
@@ -355,7 +361,7 @@ def main():
     normalizer = dataset.get_normalizer()
     normalizer.to(device)
 
-    n_episodes = len(dataset.sampler.episode_ends)
+    n_episodes = dataset.replay_buffer.n_episodes
     if args.demo_idx is not None:
         demo_indices = [args.demo_idx]
     else:
@@ -414,14 +420,14 @@ def main():
 
     output_path = pathlib.Path(args.output)
     print(f"Saving plot to {output_path}")
-    plot_latents(
-        latent_2d=latent_2d,
-        metadata=metadata,
-        codebook_2d_sets=codebook_2d_sets,
-        output_path=output_path,
-        color_mode=args.color_mode,
-        connect=args.connect_trajectories,
-    )
+    # plot_latents(
+    #     latent_2d=latent_2d,
+    #     metadata=metadata,
+    #     codebook_2d_sets=codebook_2d_sets,
+    #     output_path=output_path,
+    #     color_mode=args.color_mode,
+    #     connect=args.connect_trajectories,
+    # )
 
     if args.video_output is not None:
         video_demo_idx = args.video_demo_idx if args.video_demo_idx is not None else args.demo_idx
