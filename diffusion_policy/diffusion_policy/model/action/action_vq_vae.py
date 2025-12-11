@@ -196,15 +196,14 @@ class ActionVqVae(ModuleAttrMixin):
             
 
     def get_action_from_latent(self, latent):
-        with torch.no_grad():
-            if self.use_mlp:
-                output = self.decoder(latent) * self.act_scale
-                # (B, T * A) -> (B, T, A)
-                return einops.rearrange(output, "N (T A) -> N T A", A=self.input_dim_w)
-            else:
-                output = self.decoder(latent) * self.act_scale
-                # (B, A, T) -> (B, T, A)
-                return output.permute(0, 2, 1)
+        if self.use_mlp:
+            output = self.decoder(latent) * self.act_scale
+            # (B, T * A) -> (B, T, A)
+            return einops.rearrange(output, "N (T A) -> N T A", A=self.input_dim_w)
+        else:
+            output = self.decoder(latent) * self.act_scale
+            # (B, A, T) -> (B, T, A)
+            return output.permute(0, 2, 1)
 
 
     def preprocess(self, state):

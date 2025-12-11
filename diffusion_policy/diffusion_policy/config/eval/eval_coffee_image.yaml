@@ -19,16 +19,17 @@ shape_meta: &shape_meta
   action: 
     shape: [7]
 
-checkpoint: data/outputs/2025.10.12/11.57.24_train_diffusion_unet_hybrid_coffee_image/checkpoints/step_750.ckpt
-output_dir: data/outputs/2025.10.12/11.57.24_train_diffusion_unet_hybrid_coffee_image/eval/eval_no_noise/step_750
+checkpoint: data/outputs/2025.12.11/04.00.04_train_diffusion_unet_flowaux_hybrid_coffee_image/checkpoints/latest.ckpt
+output_dir: data/outputs/2025.12.11/04.00.04_train_diffusion_unet_flowaux_hybrid_coffee_image/eval/latest
 device: cuda:0
 
 task_name: &task_name coffee_d0
 dataset_type: &dataset_type mimicgen
-dataset_path: &dataset_path data/robomimic/datasets/${task_name}/${dataset_type}/no_noise.hdf5
+dataset_path: &dataset_path data/core/coffee_d0.hdf5
 abs_action: &abs_action False
 
-horizon: 16
+horizon: 32
+n_action_primitives: 16
 n_obs_steps: 2
 n_action_steps: 8
 n_latency_steps: 0

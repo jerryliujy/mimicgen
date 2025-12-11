@@ -75,6 +75,7 @@ class RobomimicReplayImageDataset(BaseImageDataset):
         replay_buffer = None
         if use_cache:
             cache_zarr_path = get_cache_path_from_dataset_path(dataset_path)
+            cache_zarr_path = "/workspace/mimicgen/diffusion_policy/data/core/cache_base_d287aa58690b7296983e85423136d39d.zarr.zip"
             cache_lock_path = cache_zarr_path + '.lock'
             print('Acquiring lock on cache.')
             with FileLock(cache_lock_path):
@@ -214,7 +215,7 @@ class RobomimicReplayImageDataset(BaseImageDataset):
             normalizer[key] = get_image_range_normalizer()
             
         # flow
-        normalizer['flow'] = get_image_range_normalizer()
+        # normalizer['flow'] = get_image_range_normalizer()
         
         return normalizer
 
@@ -248,23 +249,23 @@ class RobomimicReplayImageDataset(BaseImageDataset):
             obs_dict[key] = data[key][To_slice].astype(np.float32)
             del data[key]
         
-        flow_data = None
-        if len(self.flow_keys) > 0:
-            key = self.flow_keys[0]
-            flow_data = np.moveaxis(data[f'flow_{key}'][To_slice], -1, 1).astype(np.float32)
-            del data[f'flow_{key}']
+        # flow_data = None
+        # if len(self.flow_keys) > 0:
+        #     key = self.flow_keys[0]
+        #     flow_data = np.moveaxis(data[f'flow_{key}'][To_slice], -1, 1).astype(np.float32)
+        #     del data[f'flow_{key}']
         
-        if flow_data is not None:
-            torch_data = {
-                'obs': dict_apply(obs_dict, torch.from_numpy),
-                'action': torch.from_numpy(data['action'].astype(np.float32)),
-                'flow': torch.from_numpy(flow_data)
-            }
-        else:
-            torch_data = {
-                'obs': dict_apply(obs_dict, torch.from_numpy),
-                'action': torch.from_numpy(data['action'].astype(np.float32))
-            }
+        # if flow_data is not None:
+        #     torch_data = {
+        #         'obs': dict_apply(obs_dict, torch.from_numpy),
+        #         'action': torch.from_numpy(data['action'].astype(np.float32)),
+        #         # 'flow': torch.from_numpy(flow_data)
+        #     }
+        # else:
+        torch_data = {
+            'obs': dict_apply(obs_dict, torch.from_numpy),
+            'action': torch.from_numpy(data['action'].astype(np.float32))
+        }
         return torch_data
     
 
@@ -310,7 +311,7 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
     flow_keys = list()
     # construct compressors and chunks
     obs_shape_meta = shape_meta['obs']
-    flow_shape_meta = shape_meta.get('flow', dict())
+    # flow_shape_meta = shape_meta.get('flow', dict())
     for key, attr in obs_shape_meta.items():
         shape = attr['shape']
         type = attr.get('type', 'low_dim')
@@ -318,9 +319,9 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
             rgb_keys.append(key)
         elif type == 'low_dim':
             lowdim_keys.append(key)
-    for key, attr in flow_shape_meta.items():
-        if attr.get('type', 'rgb') == 'rgb':
-            flow_keys.append(key)
+    # for key, attr in flow_shape_meta.items():
+    #     if attr.get('type', 'rgb') == 'rgb':
+    #         flow_keys.append(key)
     
     root = zarr.group(store)
     data_group = root.require_group('data', overwrite=True)
@@ -434,16 +435,16 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
             
             # Common logic for rgb and flow keys
             key_map = {key: 'obs' for key in rgb_keys}
-            key_map.update({f'flow_{key}': 'flow' for key in flow_keys})
+            # key_map.update({f'flow_{key}': 'flow' for key in flow_keys})
             
             for zarr_key, data_type in key_map.items():
                 if data_type == 'obs':
                     shape = tuple(shape_meta['obs'][zarr_key]['shape'])
                     hdf5_obs_key = zarr_key
-                else: # flow
-                    flow_key_name = zarr_key.replace('flow_', '')
-                    shape = tuple(shape_meta['flow'][flow_key_name]['shape'])
-                    hdf5_obs_key = flow_key_name
+                # else: # flow
+                #     flow_key_name = zarr_key.replace('flow_', '')
+                #     shape = tuple(shape_meta['flow'][flow_key_name]['shape'])
+                #     hdf5_obs_key = flow_key_name
 
                 c,h,w = shape
                 this_compressor = Jpeg2k(level=50)
@@ -457,10 +458,10 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
 
                 demo_idx_offset = 0
                 for path in resolved_dataset_paths:
-                    flow_path = pathlib.Path(path).parent.joinpath(pathlib.Path(path).stem + '_flow' + pathlib.Path(path).suffix)
+                    # flow_path = pathlib.Path(path).parent.joinpath(pathlib.Path(path).stem + '_flow' + pathlib.Path(path).suffix)
                     
                     file_handle = h5py.File(path, 'r')
-                    flow_file_handle = h5py.File(flow_path, 'r') if data_type == 'flow' and flow_path.is_file() else None
+                    # flow_file_handle = h5py.File(flow_path, 'r') if data_type == 'flow' and flow_path.is_file() else None
                     
                     try:
                         demos = file_handle['data']
@@ -471,11 +472,11 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                             global_demo_idx = demo_idx_offset + i
                             
                             current_file = file_handle
-                            if data_type == 'flow':
-                                if flow_file_handle and f'data/{demo_key}' in flow_file_handle:
-                                    current_file = flow_file_handle
-                                else:
-                                    continue # Skip if flow file or demo_key is not available
+                    #         if data_type == 'flow':
+                    #             if flow_file_handle and f'data/{demo_key}' in flow_file_handle:
+                    #                 current_file = flow_file_handle
+                    #             else:
+                    #                 continue # Skip if flow file or demo_key is not available
 
                             hdf5_key = f"data/{demo_key}/{data_type}/{hdf5_obs_key}"
                             if hdf5_key not in current_file:
@@ -500,8 +501,8 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                         demo_idx_offset += len(demos)
                     finally:
                         file_handle.close()
-                        if flow_file_handle:
-                            flow_file_handle.close()
+                        # if flow_file_handle:
+                    #         flow_file_handle.close()
 
             completed, futures = concurrent.futures.wait(futures)
             for f in completed:

@@ -203,9 +203,9 @@ class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
 
                         # compute loss
                         if self.local_rank != -1:
-                            raw_loss = self.model.module.compute_loss(batch)
+                            raw_loss = self.model.module.compute_loss_decoder(batch)
                         else:
-                            raw_loss = self.model.compute_loss(batch)
+                            raw_loss = self.model.compute_loss_decoder(batch)
                         total_loss = raw_loss['total_loss']
                         loss = total_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
@@ -221,18 +221,18 @@ class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
                             ema.step(self.model.module if self.local_rank != -1 else self.model)
 
                         # logging
-                        diffusion_loss = raw_loss['diffusion_loss'].item()
+                        # diffusion_loss = raw_loss['diffusion_loss'].item()
                         recon_action_loss = raw_loss['recon_action_loss'].item()
                         # recon_flow_loss = raw_loss['recon_flow_loss'].item()
                         total_loss_cpu = total_loss.item()
                         tepoch.set_postfix(loss=total_loss_cpu, refresh=False)
                         train_losses.append(total_loss_cpu)
-                        train_diffusion_losses.append(diffusion_loss)
+                        # train_diffusion_losses.append(diffusion_loss)
                         train_recon_action_losses.append(recon_action_loss)
                         # train_recon_flow_losses.append(recon_flow_loss)
                         step_log = {
                             'train_loss': total_loss_cpu,
-                            'diffusion_loss': diffusion_loss,
+                            # 'diffusion_loss': diffusion_loss,
                             'recon_action_loss': recon_action_loss,
                             # 'recon_flow_loss': recon_flow_loss,
                             'global_step': self.global_step,
@@ -256,7 +256,7 @@ class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
                 # replace train_loss with epoch average
                 train_loss = np.mean(train_losses)
                 step_log['train_loss'] = train_loss
-                step_log['diffusion_loss'] = np.mean(train_diffusion_losses)
+                # step_log['diffusion_loss'] = np.mean(train_diffusion_losses)
                 step_log['recon_action_loss'] = np.mean(train_recon_action_losses)
                 # step_log['recon_flow_loss'] = np.mean(train_recon_flow_losses)
 

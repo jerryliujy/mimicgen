@@ -450,13 +450,17 @@ def _parallel_load_images(
     max_inflight_tasks,
     max_demos: int = None
 ):
-    def img_copy(zarr_arr, zarr_idx, file_path, hdf5_key, hdf5_idx):
+    def img_copy(zarr_arr, zarr_idx, dataset_path, hdf5_key, hdf5_idx):
         try:
-            with h5py.File(file_path, 'r') as file:
-                zarr_arr[zarr_idx] = file[hdf5_key][hdf5_idx]
-                _ = zarr_arr[zarr_idx] # Verify decoding
-            return True, None
-        except Exception:
+            # Each thread opens its own file handle.
+            with h5py.File(dataset_path, 'r') as file:
+                hdf5_arr = file[hdf5_key]
+                zarr_arr[zarr_idx] = hdf5_arr[hdf5_idx]
+                # make sure we can successfully decode
+                _ = zarr_arr[zarr_idx]
+            return True
+        except Exception as e:
+            print(e)
             return False
         
     print(f"Steps: {n_steps}, keys: {keys}")

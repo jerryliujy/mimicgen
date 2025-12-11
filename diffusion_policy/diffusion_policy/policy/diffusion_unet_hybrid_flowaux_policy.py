@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, reduce
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+import dill
+import hydra
 
 from diffusion_policy.model.common.normalizer import LinearNormalizer
 from diffusion_policy.policy.base_image_policy import BaseImagePolicy
@@ -49,6 +51,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             flow_weight=0.1,
             action_weight=0.1,
             action_vae_path=None,
+            diffusion_path=None,
             action_pre_encode=True,
             latent_scale=0.1,
             # parameters passed to step
@@ -149,17 +152,33 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             global_cond_dim = obs_feature_dim * n_obs_steps
         else:
             input_dim += obs_feature_dim
-
-        model = ConditionalUnet1D(
-            input_dim=input_dim,
-            local_cond_dim=None,
-            global_cond_dim=global_cond_dim,
-            diffusion_step_embed_dim=diffusion_step_embed_dim,
-            down_dims=down_dims,
-            kernel_size=kernel_size,
-            n_groups=n_groups,
-            cond_predict_scale=cond_predict_scale
-        )
+            
+        # load checkpoint
+        if diffusion_path is not None:
+            payload = torch.load(open(diffusion_path, 'rb'), pickle_module=dill)
+            cfg = payload['cfg']
+            cls = hydra.utils.get_class(cfg._target_)
+            workspace = cls(cfg)
+            workspace.load_payload(payload, exclude_keys=None, include_keys=None)
+            
+            # get policy from workspace
+            model = workspace.model.model
+            if cfg.training.use_ema:
+                model = workspace.ema_model.model
+                
+            model.eval()
+        
+        else:
+            model = ConditionalUnet1D(
+                input_dim=input_dim,
+                local_cond_dim=None,
+                global_cond_dim=global_cond_dim,
+                diffusion_step_embed_dim=diffusion_step_embed_dim,
+                down_dims=down_dims,
+                kernel_size=kernel_size,
+                n_groups=n_groups,
+                cond_predict_scale=cond_predict_scale
+            )
 
         payload = torch.load(action_vae_path, map_location='cpu')
         action_vq_vae.load_state_dict(payload['state_dicts']['model'])
@@ -242,6 +261,41 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
 
         return trajectory
 
+    
+    def decode_action(self, predicted_z):
+        B, T, D = predicted_z.shape
+        z_flat = predicted_z.view(B * T, D)
+        decoded_flat = self.action_vq_vae.decode(z_flat)  # [B*T, H, Action_Dim]
+        _, H, Action_Dim = decoded_flat.shape
+        
+        decoded_seqs = decoded_flat.view(B, T, H, Action_Dim)
+
+        # weight for each horizon step
+        # torch.linspace(1.0, 0.1, H)
+        decay_rate = 0.9
+        weights = (decay_rate ** torch.arange(H)).to(predicted_z.device) # [H]
+        weights = weights.view(1, 1, H, 1) 
+
+        # weighted average over horizon dimension
+        total_actions = torch.zeros(B, T, Action_Dim).to(predicted_z.device)
+        total_weights = torch.zeros(B, T, 1).to(predicted_z.device)
+
+        for t in range(T):
+            # only care about steps that can predict up to T
+            current_len = T - t
+            
+            preds = decoded_seqs[:, :current_len, t, :]
+            w = weights[:, :, t, :] 
+            
+            # target (batch, time, action): [:, t:T, :]
+            # for prediction at t, it starts at t and goes to T
+            total_actions[:, t:, :] += preds * w
+            total_weights[:, t:, :] += w
+
+        recon_action = total_actions / (total_weights + 1e-8)
+        
+        return recon_action
+
 
     def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
@@ -295,9 +349,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         predicted_z = predicted_z.reshape(-1, action_emb_dim)  # (B*T, D)
         predicted_z = self.latent_proj_out(predicted_z)
         with torch.no_grad():
-            naction_pred = self.action_vq_vae.decode(predicted_z)
-            naction_pred = naction_pred[:, T, :]  
-        naction_pred = naction_pred.view(B, T, -1)  # (B, T, A)
+            naction_pred = self.decode_action(predicted_z.view(B, T, action_emb_dim))
         
         action_pred = self.normalizer['action'].unnormalize(naction_pred)
 
@@ -340,7 +392,6 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         
         z = z.detach()  # block gradient to VQ-VAE
         z = self.latent_proj_in(z)
-        z_input = z
         z = z * self.latent_scale
 
         global_cond = None
@@ -377,30 +428,120 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         loss_mask = ~condition_mask
         diffusion_loss = F.mse_loss(pred[loss_mask], noise[loss_mask], reduction='mean')
         
-        pred_type = self.noise_scheduler.config.prediction_type 
-        if pred_type == 'epsilon':
-            predicted_trajectory = trajectory + pred
-        elif pred_type == 'sample':
-            predicted_trajectory = pred
-        else:
-            raise ValueError(f"Unsupported prediction type {pred_type}")
+        # pred_type = self.noise_scheduler.config.prediction_type 
+        # if pred_type == 'epsilon':
+        #     predicted_trajectory = trajectory + pred
+        # elif pred_type == 'sample':
+        #     predicted_trajectory = pred
+        # else:
+        #     raise ValueError(f"Unsupported prediction type {pred_type}")
 
-        action_emb_dim = z.shape[-1]
-        if self.obs_as_global_cond:
-            predicted_z = predicted_trajectory
-            predicted_obs_feat = predicted_z
-        else:
-            predicted_z = predicted_trajectory[..., :action_emb_dim]
-            predicted_obs_feat = predicted_trajectory[..., action_emb_dim:]
-            
-        # action loss
-        predicted_z = predicted_z.reshape(-1, action_emb_dim)
-        predicted_z = predicted_z + z_input.reshape(-1, action_emb_dim)
-        predicted_z = self.latent_proj_out(predicted_z)
+        # action_emb_dim = z.shape[-1]
+        # if self.obs_as_global_cond:
+        #     predicted_z = predicted_trajectory
+        #     predicted_obs_feat = predicted_z
+        # else:
+        #     predicted_z = predicted_trajectory[..., :action_emb_dim]
+        #     predicted_obs_feat = predicted_trajectory[..., action_emb_dim:]
+        
+        # # # action loss
+        # # predicted_z = predicted_z.reshape(-1, action_emb_dim)
+        # # predicted_z = self.latent_proj_out(predicted_z)
+        # with torch.no_grad():
+        #     recon_action = self.action_vq_vae.decode(predicted_z)
+        #     recon_action = recon_action[:, T, :]
+        #     recon_action = recon_action.view(batch_size, T, -1)
+        #     recon_a_loss = F.mse_loss(recon_action, nactions, reduction='mean')
+        
+        # flow loss 
+        # recon_flow = self.flow_decoder(predicted_obs_feat)
+        # recon_flow = recon_flow[:, :n_obs_steps]
+        # recon_f_loss = F.l1_loss(recon_flow, nflow, reduction='mean')
+        
+        total_loss = diffusion_loss 
+        
+        loss_dict = {
+            'diffusion_loss': diffusion_loss,
+            # 'recon_action_loss': recon_a_loss,
+            # 'recon_flow_loss': recon_f_loss,
+            'total_loss': total_loss
+        }
+        return loss_dict
+
+        
+    def compute_loss_decoder(self, batch):
+        # normalize input
+        assert 'valid_mask' not in batch
+        nobs = self.normalizer.normalize(batch['obs'])
+        nactions = self.normalizer['action'].normalize(batch['action'])
+        z = batch['z']
+        assert z is not None if self.action_pre_encode else True, "z must be provided in batch if action_pre_encode is False"
+        
+        value = next(iter(nobs.values()))
+        B, To = value.shape[:2]
+        T = self.n_action_primitives
+        Do = self.obs_feature_dim
+        action_emb_dim = self.action_emb_dim
+        
+        device = self.device   
+        dtype = self.dtype
+        
+        # encode action to latent space
+        if not self.action_pre_encode:
+            z_list = []
+            for i in range(T):
+                action_steps = nactions[:, i:i+self.horizon, :]
+                z = self.action_vq_vae.encode(action_steps)
+                z_list.append(z)
+            z = torch.stack(z_list, dim=1)
+        
+        # freeze encoder & diffusion; only decoder gets grads
         with torch.no_grad():
-            recon_action = self.action_vq_vae.decode(predicted_z)
-            recon_action = recon_action[:, T, :]
-            recon_action = recon_action.view(batch_size, T, -1)
+            z = z.detach()
+            z = self.latent_proj_in(z) * self.latent_scale
+
+            self.model.eval()
+            self.obs_encoder.eval()
+
+            if self.obs_as_global_cond:
+                this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
+                nobs_features = self.obs_encoder(this_nobs)
+                global_cond = nobs_features.reshape(B, -1)
+
+                # add noise on encoded z then denoise with eval sampling steps
+                self.noise_scheduler.set_timesteps(self.num_inference_steps)
+                t0 = self.noise_scheduler.timesteps[0]
+                timesteps = torch.full((B,), t0, device=device, dtype=torch.long)
+                noise = torch.randn_like(z)
+                noisy_z = self.noise_scheduler.add_noise(z, noise, timesteps)
+
+                for t in self.noise_scheduler.timesteps:
+                    model_output = self.model(noisy_z, t, global_cond=global_cond)
+                    noisy_z = self.noise_scheduler.step(model_output, t, noisy_z, **self.kwargs).prev_sample
+                predicted_z = noisy_z
+            else:
+                # condition through impainting (eval-style) with noisy init from encoded z
+                this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
+                nobs_features = self.obs_encoder(this_nobs)
+                nobs_features = nobs_features.reshape(B, To, -1)
+
+                cond_data = torch.zeros(size=(B, T, action_emb_dim + Do), device=device, dtype=dtype)
+                cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
+                cond_data[:,:To,action_emb_dim:] = nobs_features
+                cond_mask[:,:To,action_emb_dim:] = True
+
+                predicted_trajectory = self.conditional_sample(
+                    cond_data, 
+                    cond_mask,
+                    global_cond=None,
+                    **self.kwargs)
+            
+                predicted_z = predicted_trajectory[..., :action_emb_dim]  # (B, T, D)
+
+        # decode with gradients to finetune decoder
+        predicted_z = predicted_z.detach().reshape(-1, action_emb_dim)
+        predicted_z = self.latent_proj_out(predicted_z)
+        recon_action = self.decode_action(predicted_z.view(B, T, action_emb_dim))
         recon_a_loss = F.mse_loss(recon_action, nactions, reduction='mean')
         
         # flow loss 
@@ -408,10 +549,10 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         # recon_flow = recon_flow[:, :n_obs_steps]
         # recon_f_loss = F.l1_loss(recon_flow, nflow, reduction='mean')
         
-        total_loss = diffusion_loss + self.action_weight * recon_a_loss
+        total_loss = recon_a_loss
         
         loss_dict = {
-            'diffusion_loss': diffusion_loss,
+            # 'diffusion_loss': diffusion_loss,
             'recon_action_loss': recon_a_loss,
             # 'recon_flow_loss': recon_f_loss,
             'total_loss': total_loss
