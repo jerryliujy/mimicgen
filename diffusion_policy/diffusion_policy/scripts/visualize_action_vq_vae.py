@@ -123,6 +123,7 @@ def sliding_window_latents(
     max_windows: int = None,
     demo_ids: Sequence[int] = None,
 ) -> Tuple[np.ndarray, List[Tuple[int, int]]]:
+    print("Horizon:", horizon)
     latents = []
     metadata = []  # (demo_idx, window_start)
     total_windows = 0
@@ -326,12 +327,12 @@ def render_action_latent_video(
 
 """
 python diffusion_policy/scripts/visualize_action_vq_vae.py \
-  --checkpoint data/checkpoints/mlp3/latest.ckpt \
+  --checkpoint data/checkpoints/mlp2/latest.ckpt \
   --output data/media/latents/coffee_demo0.png \
   --demo-idx 0 \
   --stride 1 \
   --reducer tsne \
-  --video-output data/media/latents/coffee_demo0.mp4 
+  --video-output data/media/latents/coffee_demo0_mlp2.mp4 
 """
 def main():
     parser = argparse.ArgumentParser(description="Visualize Action VQ-VAE latent space over dataset demos.")

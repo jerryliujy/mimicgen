@@ -392,7 +392,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         
         z = z.detach()  # block gradient to VQ-VAE
         z = self.latent_proj_in(z)
-        z = z * self.latent_scale
+        # z = z * self.latent_scale
 
         global_cond = None
         trajectory = z

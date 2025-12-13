@@ -9,8 +9,8 @@ task_name: ${task.name}
 shape_meta: ${task.shape_meta}
 exp_name: "default"
 
-horizon: 32
-n_action_primitives: 16  # the number of sequence to denoise in diffusion
+horizon: 16
+n_action_primitives: 8  # the number of sequence to denoise in diffusion
 n_obs_steps: 2
 n_action_steps: 8
 n_latency_steps: 0
@@ -81,7 +81,7 @@ policy:
   flow_weight: 1
   action_weight: 1
   action_pre_encode: ${action_pre_encode}
-  action_vae_path: data/checkpoints/mlp3/latest.ckpt
+  action_vae_path: data/checkpoints/mlp2/latest.ckpt
   latent_scale: 1
   # diffusion_path: data/outputs/2025.12.10/05.02.47_train_diffusion_unet_flowaux_hybrid_coffee_image/checkpoints/latest.ckpt
   diffusion_path: null
@@ -126,7 +126,7 @@ training:
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 50
-  num_epochs: 501
+  num_epochs: 301
   gradient_accumulate_every: 1
   # EMA destroys performance when used with BatchNorm
   # replace BatchNorm with GroupNorm.
@@ -155,7 +155,7 @@ logging:
 
 checkpoint:
   save_ckpt: True
-  save_specific_steps: [300, 400]  
+  # save_specific_steps: []  
   topk:
     monitor_key: test_mean_score
     mode: max
