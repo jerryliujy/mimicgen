@@ -32,9 +32,20 @@ class RLDPPolicy(BaseImagePolicy):
         step_choice_idx, log_prob, _ = self.model.get_action(obs_dict)
         self.saved_log_probs.append(log_prob)
         
-        execution_steps = self.model.get_execution_step_count(step_choice_idx)
-        action_to_execute = full_action_chunk[:, :execution_steps, :]
-
+        # Handle batch of execution steps: Pad to the maximum length in the batch
+        execution_steps_batch = [self.model.get_execution_step_count(idx) for idx in step_choice_idx]
+        max_steps = max(execution_steps_batch)
+        
+        batch_size = full_action_chunk.shape[0]
+        action_dim = full_action_chunk.shape[-1]
+        
+        action_to_execute = torch.zeros((batch_size, max_steps, action_dim), device=self.device, dtype=self.dtype)
+        
+        for i in range(batch_size):
+            steps = execution_steps_batch[i]
+            # Copy valid steps
+            action_to_execute[i, :steps, :] = full_action_chunk[i, :steps, :]
+                
         return {'action': action_to_execute}
 
     def update(self, optimizer, gamma):

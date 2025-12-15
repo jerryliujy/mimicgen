@@ -63,14 +63,30 @@ class TrainRLWorkspace(BaseWorkspace):
         )
         
         # 3. Create the wrapper policy for RL
-        self.model = RLDPPolicy(
-            action_generator=self.action_generator,
-            action_chunker_net=action_chunker_net
-        )
+        # Toggle between PPO and REINFORCE for testing
+        # Set use_ppo = False to test with simple REINFORCE first
+        use_ppo = True 
+        
+        if use_ppo:
+            from diffusion_policy.policy.ppo_chunker_policy import PPOChunkerPolicy
+            self.model = PPOChunkerPolicy(
+                action_generator=self.action_generator,
+                action_chunker_net=action_chunker_net
+            )
+            # Configure optimizer for Actor + Critic
+            params = list(self.model.model.parameters()) + list(self.model.value_head.parameters())
+        else:
+            from diffusion_policy.policy.rl_dp_policy import RLDPPolicy
+            self.model = RLDPPolicy(
+                action_generator=self.action_generator,
+                action_chunker_net=action_chunker_net
+            )
+            # Configure optimizer for Actor only
+            params = self.model.model.parameters()
 
-        # 4. Configure optimizer for the chunker network parameters
+        # 4. Configure optimizer
         self.optimizer = hydra.utils.instantiate(
-            cfg.optimizer, params=self.model.model.parameters())
+            cfg.optimizer, params=params)
 
         # configure training state
         self.global_step = 0
@@ -91,8 +107,35 @@ class TrainRLWorkspace(BaseWorkspace):
         self.model.set_normalizer(normalizer)
 
         # configure env runner
-        env_runner: BaseImageRunner = hydra.utils.instantiate(
-            cfg.task.env_runner, output_dir=self.output_dir)
+        # Use our custom RL runner
+        from diffusion_policy.env_runner.robomimic_image_rl_runner import RobomimicImageRLRunner
+        # We need to override the target in cfg or instantiate directly
+        # Assuming cfg.task.env_runner is configured for RobomimicImageRunner, we can just swap the class
+        # or better, update the config to point to our new runner if we registered it.
+        # Since we didn't register it in hydra, let's instantiate it manually using the config params.
+        
+        runner_cfg = cfg.task.env_runner
+        env_runner = RobomimicImageRLRunner(
+            output_dir=self.output_dir,
+            dataset_path=runner_cfg.dataset_path,
+            shape_meta=runner_cfg.shape_meta,
+            n_train=runner_cfg.n_train,
+            n_train_vis=runner_cfg.n_train_vis,
+            train_start_idx=runner_cfg.train_start_idx,
+            n_test=runner_cfg.n_test,
+            n_test_vis=runner_cfg.n_test_vis,
+            test_start_seed=runner_cfg.test_start_seed,
+            max_steps=runner_cfg.max_steps,
+            n_obs_steps=runner_cfg.n_obs_steps,
+            n_action_steps=runner_cfg.n_action_steps,
+            render_obs_key=runner_cfg.render_obs_key,
+            fps=runner_cfg.fps,
+            crf=runner_cfg.crf,
+            past_action=runner_cfg.past_action,
+            abs_action=runner_cfg.abs_action,
+            tqdm_interval_sec=runner_cfg.tqdm_interval_sec,
+            n_envs=runner_cfg.n_envs
+        )
 
         # configure logging
         wandb_run = None
