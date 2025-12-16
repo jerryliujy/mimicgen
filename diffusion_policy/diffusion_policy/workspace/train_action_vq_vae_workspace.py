@@ -22,6 +22,7 @@ import numpy as np
 import shutil
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 from diffusion_policy.model.action.action_vq_vae import ActionVqVae
+from diffusion_policy.model.action.action_ae import ActionAe
 from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
 from diffusion_policy.common.json_logger import JsonLogger
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
@@ -40,9 +41,9 @@ class TrainActionVqVaeWorkspace(BaseWorkspace):
         torch.manual_seed(seed)
         np.random.seed(seed)
         random.seed(seed)
-
+        
         # configure model
-        self.model: ActionVqVae = hydra.utils.instantiate(cfg.policy)
+        self.model = hydra.utils.instantiate(cfg.policy)
 
         # configure training state
         self.optimizer = hydra.utils.instantiate(

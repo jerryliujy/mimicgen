@@ -282,9 +282,9 @@ class TrainDiffusionUnetFlowauxHybridWorkspace(BaseWorkspace):
                             for batch_idx, batch in enumerate(tepoch):
                                 batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
                                 if self.local_rank != -1:
-                                    loss = self.model.module.compute_loss(batch)
+                                    loss = self.model.module.compute_loss_decoder(batch)
                                 else:
-                                    loss = self.model.compute_loss(batch)
+                                    loss = self.model.compute_loss_decoder(batch)
                                 val_count += 1
                                 for k, v in loss.items():
                                     val_sums[k] = val_sums.get(k, 0.0) + v.item()

@@ -363,7 +363,7 @@ class RobomimicReplayImageFlowDataset(BaseImageDataset):
 
             # Encode a single horizon window per sequence (faster, no n_action_primitives loop)
             window = norm_batch[:, :self.horizon]              # (B, horizon, A)
-            z_batch = action_vq_vae.encode(window).cpu().numpy()  # (B, latent_dim)
+            z_batch = action_vq_vae.encode(window).detach().cpu().numpy()  # (B, latent_dim)
 
             # Initialize storage lazily once latent dim is known
             if latents_store is None:

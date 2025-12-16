@@ -9,8 +9,8 @@ task_name: ${task.name}
 shape_meta: ${task.shape_meta}
 exp_name: "default"
 
-horizon: 16
-n_action_primitives: 8  # the number of sequence to denoise in diffusion
+horizon: 1
+n_action_primitives: 16  # the number of sequence to denoise in diffusion
 n_obs_steps: 2
 n_action_steps: 8
 n_latency_steps: 0
@@ -51,15 +51,23 @@ policy:
     kernel_size: 4
   
   action_vq_vae: 
-    _target_: diffusion_policy.model.action.action_vq_vae.ActionVqVae
+    # _target_: diffusion_policy.model.action.action_vq_vae.ActionVqVae
+    # input_dim_h: ${horizon}  # length of action chunk
+    # input_dim_w: 7  # action dim
+    # # down_dims: [128]
+    # down_dims: null
+    # n_latent_dims: ${action_emb_dim}
+    # vqvae_n_embed: 16
+    # vqvae_groups: 2
+    # encoder_loss_multiplier: 1.0
+    # act_scale: 1.0
+    # use_mlp: true
+
+    _target_: diffusion_policy.model.action.action_ae.ActionAe
     input_dim_h: ${horizon}  # length of action chunk
     input_dim_w: 7  # action dim
-    # down_dims: [128]
-    down_dims: null
-    n_latent_dims: ${action_emb_dim}
-    vqvae_n_embed: 16
-    vqvae_groups: 2
-    encoder_loss_multiplier: 1.0
+    down_dims: [128]
+    n_latent_dims: 512
     act_scale: 1.0
     use_mlp: true
 
@@ -81,9 +89,9 @@ policy:
   flow_weight: 1
   action_weight: 1
   action_pre_encode: ${action_pre_encode}
-  action_vae_path: data/checkpoints/mlp2/latest.ckpt
+  action_vae_path: data/outputs/2025.12.15/23.42.22_train_action_vq_vae_workspace_coffee_image/checkpoints/latest.ckpt
   latent_scale: 1
-  diffusion_path: data/outputs/2025.12.12/14.09.46_train_diffusion_unet_flowaux_hybrid_coffee_image/checkpoints/latest.ckpt
+  diffusion_path: data/outputs/2025.12.16/08.36.49_train_diffusion_unet_flowaux_hybrid_coffee_image/checkpoints/latest.ckpt
 
   # scheduler.step params
   # predict_epsilon: True

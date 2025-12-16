@@ -210,8 +210,8 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         self.kwargs = kwargs
 
         # projection layers to let diffusion operate in a learnable latent subspace
-        self.latent_proj_in = nn.Linear(action_emb_dim, action_emb_dim)
-        self.latent_proj_out = nn.Linear(action_emb_dim, action_emb_dim)
+        # self.latent_proj_in = nn.Linear(action_emb_dim, action_emb_dim)
+        # self.latent_proj_out = nn.Linear(action_emb_dim, action_emb_dim)
 
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
@@ -267,6 +267,9 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         z_flat = predicted_z.view(B * T, D)
         decoded_flat = self.action_vq_vae.decode(z_flat)  # [B*T, H, Action_Dim]
         _, H, Action_Dim = decoded_flat.shape
+
+        if H == 1:
+            return decoded_flat.reshape(B, T, Action_Dim)
         
         decoded_seqs = decoded_flat.view(B, T, H, Action_Dim)
 
@@ -279,21 +282,15 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         # weighted average over horizon dimension
         total_actions = torch.zeros(B, T, Action_Dim).to(predicted_z.device)
         total_weights = torch.zeros(B, T, 1).to(predicted_z.device)
-
+        
         for t in range(T):
-            # only care about steps that can predict up to T
-            current_len = T - t
-            
-            preds = decoded_seqs[:, :current_len, t, :]
-            w = weights[:, :, t, :] 
-            
-            # target (batch, time, action): [:, t:T, :]
-            # for prediction at t, it starts at t and goes to T
-            total_actions[:, t:, :] += preds * w
-            total_weights[:, t:, :] += w
+            max_h = min(H, T - t)                 
+            preds = decoded_seqs[:, t, :max_h, :]  # (B, max_h, A)
+            w = weights[:, :, :max_h, :]           # (1,1,max_h,1)
+            total_actions[:, t:t+max_h, :] += preds * w
+            total_weights[:, t:t+max_h, :] += w
 
         recon_action = total_actions / (total_weights + 1e-8)
-        
         return recon_action
 
 
@@ -347,7 +344,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             predicted_z = predicted_trajectory[..., :action_emb_dim]  # (B, T, D)
             
         predicted_z = predicted_z.reshape(-1, action_emb_dim)  # (B*T, D)
-        predicted_z = self.latent_proj_out(predicted_z)
+        # predicted_z = self.latent_proj_out(predicted_z)
         with torch.no_grad():
             naction_pred = self.decode_action(predicted_z.view(B, T, action_emb_dim))
         
@@ -391,7 +388,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
             z = torch.stack(z_list, dim=1)
         
         z = z.detach()  # block gradient to VQ-VAE
-        z = self.latent_proj_in(z)
+        # z = self.latent_proj_in(z)
         # z = z * self.latent_scale
 
         global_cond = None
@@ -498,7 +495,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
         # freeze encoder & diffusion; only decoder gets grads
         with torch.no_grad():
             z = z.detach()
-            z = self.latent_proj_in(z) * self.latent_scale
+            # z = self.latent_proj_in(z) * self.latent_scale
 
             self.model.eval()
             self.obs_encoder.eval()
@@ -540,7 +537,7 @@ class DiffusionUnetHybridFlowauxPolicy(BaseImagePolicy):
 
         # decode with gradients to finetune decoder
         predicted_z = predicted_z.detach().reshape(-1, action_emb_dim)
-        predicted_z = self.latent_proj_out(predicted_z)
+        # predicted_z = self.latent_proj_out(predicted_z)
         recon_action = self.decode_action(predicted_z.view(B, T, action_emb_dim))
         recon_a_loss = F.mse_loss(recon_action, nactions, reduction='mean')
         

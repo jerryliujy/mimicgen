@@ -8,7 +8,7 @@ _target_: diffusion_policy.workspace.train_action_vq_vae_workspace.TrainActionVq
 task_name: ${task.name}
 exp_name: "default"
 
-horizon: 32
+horizon: 1
 n_obs_steps: 2
 n_action_steps: 8
 n_latency_steps: 0
@@ -18,35 +18,43 @@ past_action_visible: False
 device: 'cuda'
 
 policy:
-  _target_: diffusion_policy.model.action.action_vq_vae.ActionVqVae
+  # _target_: diffusion_policy.model.action.action_vq_vae.ActionVqVae
+  # input_dim_h: ${horizon}  # length of action chunk
+  # input_dim_w: 7  # action dim
+  # # down_dims: [128]
+  # down_dims: null
+  # n_latent_dims: 512
+  # vqvae_n_embed: 16
+  # vqvae_groups: 2
+  # encoder_loss_multiplier: 1.0
+  # act_scale: 1.0
+  # use_mlp: true
+
+  _target_: diffusion_policy.model.action.action_ae.ActionAe
   input_dim_h: ${horizon}  # length of action chunk
   input_dim_w: 7  # action dim
-  # down_dims: [128]
-  down_dims: null
+  down_dims: [128]
   n_latent_dims: 512
-  vqvae_n_embed: 16
-  vqvae_groups: 2
-  encoder_loss_multiplier: 1.0
   act_scale: 1.0
   use_mlp: true
 
 dataloader:
-  batch_size: 2048
+  batch_size: 16384
   num_workers: 8
   shuffle: True
   pin_memory: True
   persistent_workers: False
 
 val_dataloader:
-  batch_size: 2048
+  batch_size: 16384
   num_workers: 8
   shuffle: False
   pin_memory: True
   persistent_workers: False
 
 optimizer:
-  _target_: torch.optim.Adam
-  lr: 1e-3
+  _target_: torch.optim.AdamW
+  lr: 1e-5
   betas: [0.9, 0.999]
   eps: 1.0e-8
   weight_decay: 1e-4
@@ -56,11 +64,11 @@ training:
   seed: 42
   debug: False
   resume: True
-  num_epochs: 301
+  num_epochs: 1001
   # training loop control
   # in epochs
-  checkpoint_every: 300
-  val_every: 50
+  checkpoint_every: 1000
+  val_every: 100
   # steps per epoch
   max_train_steps: null
   max_val_steps: null
@@ -79,7 +87,7 @@ logging:
 
 checkpoint:
   save_ckpt: True
-  save_specific_steps: [150, 225]  
+  save_specific_steps: [800]  
   topk:
     monitor_key: test_mean_score
     mode: max
